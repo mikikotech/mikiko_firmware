@@ -21,10 +21,15 @@
 // #define WIFI_SSID "Mikikotech"
 // #define WIFI_PASSWORD "6jt/bulan"
 
-#define FIREBASE_PROJECT_ID "mikiko-c5ca4"
-#define STORAGE_BUCKET_ID "mikiko-c5ca4.appspot.com"
-#define API_KEY "AIzaSyAMMrTWIU5gKeCDKwiLwO-7liVvfpT8u-M"
-#define DATABASE_URL "https://mikiko-c5ca4-default-rtdb.firebaseio.com/"
+// #define FIREBASE_PROJECT_ID "mikiko-c5ca4"
+// #define STORAGE_BUCKET_ID "mikiko-c5ca4.appspot.com"
+// #define API_KEY "AIzaSyAMMrTWIU5gKeCDKwiLwO-7liVvfpT8u-M"
+// #define DATABASE_URL "https://mikiko-c5ca4-default-rtdb.firebaseio.com/"
+
+#define FIREBASE_PROJECT_ID "mikikov1"
+#define STORAGE_BUCKET_ID "mikikov1.appspot.com"
+#define API_KEY "AIzaSyDrtu0ZNYwh-rrG8TKplC0Sjlku7QTnOkY"
+#define DATABASE_URL "https://mikikov1-default-rtdb.firebaseio.com/"
 
 #define FIRMWARE_VERSION "0.0.1"
 
@@ -646,6 +651,12 @@ void scheduleAndAction()
           vTaskResume(task1_handle);
           timmerCheck1 = false;
         }
+        else if (time == getTime && status == true && day > 7)
+        {
+          duration1 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
+          vTaskResume(task1_handle);
+          timmerCheck1 = false;
+        }
       }
     }
     else if (output == "out2")
@@ -661,6 +672,12 @@ void scheduleAndAction()
           vTaskResume(task2_handle);
           timmerCheck2 = false;
         }
+        else if (time == getTime && status == true && day > 7)
+        {
+          duration2 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
+          vTaskResume(task2_handle);
+          timmerCheck2 = false;
+        }
       }
     }
     else if (output == "out3")
@@ -671,6 +688,12 @@ void scheduleAndAction()
         String time = schedule["schedule"][j]["mapValue"]["fields"]["time"]["stringValue"];
         uint8_t day = schedule["schedule"][j]["mapValue"]["fields"]["every"]["integerValue"];
         if (time == getTime && status == true && days == day)
+        {
+          duration3 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
+          vTaskResume(task3_handle);
+          timmerCheck3 = false;
+        }
+        else if (time == getTime && status == true && day > 7)
         {
           duration3 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
           vTaskResume(task3_handle);
@@ -693,6 +716,12 @@ void scheduleAndAction()
           vTaskResume(task4_handle);
           timmerCheck4 = false;
         }
+        else if (time == getTime && status == true && day > 7)
+        {
+          duration4 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
+          vTaskResume(task4_handle);
+          timmerCheck4 = false;
+        }
       }
     }
     else if (output == "out5")
@@ -708,6 +737,12 @@ void scheduleAndAction()
           vTaskResume(task5_handle);
           timmerCheck5 = false;
         }
+        else if (time == getTime && status == true && day > 7)
+        {
+          duration5 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
+          vTaskResume(task5_handle);
+          timmerCheck5 = false;
+        }
       }
     }
   }
@@ -718,12 +753,13 @@ void scheduleAndAction()
 
   for (int i = 0; i < actions["actions"].size(); i++)
   {
-    String output = actions["actions"][i]["mapValue"]["fields"]["then"]["stringValue"];
+    String output = actions["actions"][i]["mapValue"]["fields"]["output"]["stringValue"];
     Serial.println(output);
     if (output == "out1")
     {
       String con = actions["actions"][i]["mapValue"]["fields"]["if"]["stringValue"];
-      if (con == "temp")
+      bool status = schedule["actions"][i]["mapValue"]["fields"]["status"]["booleanValue"];
+      if (con == "temp" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
@@ -744,7 +780,7 @@ void scheduleAndAction()
           }
         }
       }
-      else if (con == "humi")
+      else if (con == "humi" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
@@ -765,7 +801,7 @@ void scheduleAndAction()
           }
         }
       }
-      else if (con == "soil")
+      else if (con == "soil" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
@@ -786,7 +822,7 @@ void scheduleAndAction()
           }
         }
       }
-      else if (con == "ph")
+      else if (con == "ph" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
@@ -811,7 +847,8 @@ void scheduleAndAction()
     else if (output == "out2")
     {
       String con = actions["actions"][i]["mapValue"]["fields"]["if"]["stringValue"];
-      if (con == "temp")
+      bool status = schedule["actions"][i]["mapValue"]["fields"]["status"]["booleanValue"];
+      if (con == "temp" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
@@ -832,7 +869,7 @@ void scheduleAndAction()
           }
         }
       }
-      else if (con == "humi")
+      else if (con == "humi" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
@@ -853,7 +890,7 @@ void scheduleAndAction()
           }
         }
       }
-      else if (con == "soil")
+      else if (con == "soil" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
@@ -874,7 +911,7 @@ void scheduleAndAction()
           }
         }
       }
-      else if (con == "ph")
+      else if (con == "ph" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
@@ -898,8 +935,9 @@ void scheduleAndAction()
     }
     else if (output == "out3")
     {
+      bool status = schedule["actions"][i]["mapValue"]["fields"]["status"]["booleanValue"];
       String con = actions["actions"][i]["mapValue"]["fields"]["if"]["stringValue"];
-      if (con == "temp")
+      if (con == "temp" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
@@ -920,7 +958,7 @@ void scheduleAndAction()
           }
         }
       }
-      else if (con == "humi")
+      else if (con == "humi" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
@@ -941,7 +979,7 @@ void scheduleAndAction()
           }
         }
       }
-      else if (con == "soil")
+      else if (con == "soil" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
@@ -962,7 +1000,7 @@ void scheduleAndAction()
           }
         }
       }
-      else if (con == "ph")
+      else if (con == "ph" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
@@ -986,8 +1024,9 @@ void scheduleAndAction()
     }
     else if (output == "out4")
     {
+      bool status = schedule["actions"][i]["mapValue"]["fields"]["status"]["booleanValue"];
       String con = actions["actions"][i]["mapValue"]["fields"]["if"]["stringValue"];
-      if (con == "temp")
+      if (con == "temp" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
@@ -1008,7 +1047,7 @@ void scheduleAndAction()
           }
         }
       }
-      else if (con == "humi")
+      else if (con == "humi" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
@@ -1029,7 +1068,7 @@ void scheduleAndAction()
           }
         }
       }
-      else if (con == "soil")
+      else if (con == "soil" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
@@ -1050,7 +1089,7 @@ void scheduleAndAction()
           }
         }
       }
-      else if (con == "ph")
+      else if (con == "ph" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
@@ -1074,8 +1113,9 @@ void scheduleAndAction()
     }
     else if (output == "out5")
     {
+      bool status = schedule["actions"][i]["mapValue"]["fields"]["status"]["booleanValue"];
       String con = actions["actions"][i]["mapValue"]["fields"]["if"]["stringValue"];
-      if (con == "temp")
+      if (con == "temp" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
@@ -1096,7 +1136,7 @@ void scheduleAndAction()
           }
         }
       }
-      else if (con == "humi")
+      else if (con == "humi" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
@@ -1117,7 +1157,7 @@ void scheduleAndAction()
           }
         }
       }
-      else if (con == "soil")
+      else if (con == "soil" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
@@ -1138,7 +1178,7 @@ void scheduleAndAction()
           }
         }
       }
-      else if (con == "ph")
+      else if (con == "ph" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
