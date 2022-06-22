@@ -453,18 +453,6 @@ void setup()
   btn.attachLongPressStart(btnLongPress);
   btn.setPressTicks(2000);
 
-  // WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  // Serial.print("Connecting to Wi-Fi");
-  // while (WiFi.status() != WL_CONNECTED)
-  // {
-  //   Serial.print(".");
-  //   delay(300);
-  // }
-  // Serial.println();
-  // Serial.print("Connected with IP: ");
-  // Serial.println(WiFi.localIP());
-  // Serial.println();
-
   connectToWifi();
 
   // client.enableDebuggingMessages();
@@ -763,11 +751,12 @@ void scheduleAndAction()
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
+        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
         if (_con == ">=")
         {
           if (value >= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -775,7 +764,7 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -784,11 +773,12 @@ void scheduleAndAction()
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
+        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
         if (_con == ">=")
         {
           if (value >= h)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -796,7 +786,7 @@ void scheduleAndAction()
         {
           if (value <= h)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -805,11 +795,12 @@ void scheduleAndAction()
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
+        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
         if (_con == ">=")
         {
           if (value >= kelembabanTanah)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -817,7 +808,7 @@ void scheduleAndAction()
         {
           if (value <= kelembabanTanah)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -826,11 +817,12 @@ void scheduleAndAction()
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
+        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
         if (_con == ">=")
         {
           if (value >= phTanahValue)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -838,7 +830,7 @@ void scheduleAndAction()
         {
           if (value <= phTanahValue)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -852,11 +844,12 @@ void scheduleAndAction()
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
+        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
         if (_con == ">=")
         {
           if (value >= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -864,7 +857,7 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -873,11 +866,12 @@ void scheduleAndAction()
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
+        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
         if (_con == ">=")
         {
           if (value >= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -885,7 +879,7 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -894,11 +888,12 @@ void scheduleAndAction()
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
+        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
         if (_con == ">=")
         {
           if (value >= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -906,7 +901,7 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -915,11 +910,12 @@ void scheduleAndAction()
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
+        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
         if (_con == ">=")
         {
           if (value >= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -927,7 +923,7 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -941,11 +937,12 @@ void scheduleAndAction()
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
+        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
         if (_con == ">=")
         {
           if (value >= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -953,7 +950,6 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
             digitalWrite(out1, state);
           }
         }
@@ -962,11 +958,11 @@ void scheduleAndAction()
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
+        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
         if (_con == ">=")
         {
           if (value >= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
             digitalWrite(out1, state);
           }
         }
@@ -974,7 +970,6 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
             digitalWrite(out1, state);
           }
         }
@@ -983,11 +978,12 @@ void scheduleAndAction()
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
+        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
         if (_con == ">=")
         {
           if (value >= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -995,7 +991,7 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -1004,11 +1000,12 @@ void scheduleAndAction()
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
+        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
         if (_con == ">=")
         {
           if (value >= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -1016,7 +1013,7 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -1030,11 +1027,12 @@ void scheduleAndAction()
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
+        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
         if (_con == ">=")
         {
           if (value >= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -1042,7 +1040,7 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -1051,11 +1049,12 @@ void scheduleAndAction()
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
+        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
         if (_con == ">=")
         {
           if (value >= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -1063,7 +1062,7 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -1072,11 +1071,12 @@ void scheduleAndAction()
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
+        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
         if (_con == ">=")
         {
           if (value >= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -1084,7 +1084,7 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -1093,11 +1093,12 @@ void scheduleAndAction()
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
+        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
         if (_con == ">=")
         {
           if (value >= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -1105,7 +1106,7 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -1119,11 +1120,12 @@ void scheduleAndAction()
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
+        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
         if (_con == ">=")
         {
           if (value >= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -1131,7 +1133,7 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -1140,11 +1142,12 @@ void scheduleAndAction()
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
+        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
         if (_con == ">=")
         {
           if (value >= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -1152,7 +1155,7 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -1161,11 +1164,12 @@ void scheduleAndAction()
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
+        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
         if (_con == ">=")
         {
           if (value >= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -1173,7 +1177,7 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -1182,11 +1186,12 @@ void scheduleAndAction()
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
         String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
+        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
         if (_con == ">=")
         {
           if (value >= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
@@ -1194,7 +1199,7 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-            bool state = actions["actions"][i]["mapValue"]["fields"]["do"]["booleanValue"];
+
             digitalWrite(out1, state);
           }
         }
