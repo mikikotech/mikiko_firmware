@@ -10,7 +10,6 @@
 #include <EspMQTTClient.h>
 #include <WiFiUdp.h>
 #include "Update.h"
-#include "HTTPClient.h"
 #include "EEPROM.h"
 #include <Ticker.h>
 #include <LiquidCrystal_I2C.h>
@@ -31,6 +30,9 @@
 #define API_KEY "AIzaSyDrtu0ZNYwh-rrG8TKplC0Sjlku7QTnOkY"
 #define DATABASE_URL "https://mikikov1-default-rtdb.firebaseio.com/"
 
+// device info
+#define DEVICE_EMAIL "mikikoMTH@mikiko.com"
+#define DEVICE_PASS "mikikoMTH"
 #define FIRMWARE_VERSION "0.0.1"
 
 #define LENGTH(x) (strlen(x) + 1) // length of char string
@@ -114,7 +116,7 @@ int duration5;
 float t, h, phTanahValue;
 int kelembabanTanah;
 
-String documentPath = "prasimanuel98@gmail.com/12345678";
+String documentPath;
 String mask = "actions";
 
 void writeStringToFlash(const char *toStore, int startAddr)
@@ -292,6 +294,9 @@ void connectToWifi()
       if (cnt > 5000)
       {
         wificheck = false;
+        writeStringToFlash("", 0);  // Reset the SSID
+        writeStringToFlash("", 40); // Reset the Password
+        writeStringToFlash("", 80); // Reset docPathId
         break;
       }
       cnt++;
@@ -381,7 +386,6 @@ void sensorRead()
   t = dht.readTemperature();
   if (isnan(h) || isnan(t))
   {
-    Serial.println(F("Failed to read from DHT sensor!"));
     h = 0;
     t = 0;
   }
@@ -454,6 +458,8 @@ void setup()
   MACADD = getValue(MACADD, 58, 0) + getValue(MACADD, 58, 1) + getValue(MACADD, 58, 2) + getValue(MACADD, 58, 3) + getValue(MACADD, 58, 4) + getValue(MACADD, 58, 5);
   MACADD.toLowerCase();
 
+  Serial.println(MACADD);
+
   lcd.begin();
   lcd.backlight();
   dht.begin();
@@ -490,14 +496,18 @@ void setup()
   documentPath = String(docPathId + "/" + MACADD);
 
   /* Sign up */
-  if (Firebase.signUp(&config, &auth, "", ""))
-  {
-    signupOK = true;
-  }
-  else
-  {
-    Serial.printf("%s\n", config.signer.signupError.message.c_str());
-  }
+  // if (Firebase.signUp(&config, &auth, "mikikotech@gmail.com", "Dalungww23"))
+  // {
+  //   signupOK = true;
+  // }
+  // else
+  // {
+  //   Serial.printf("%s\n", config.signer.signupError.message.c_str());
+  // }
+
+  auth.user.email = DEVICE_EMAIL;
+  auth.user.password = DEVICE_PASS;
+
   config.token_status_callback = tokenStatusCallback;
 
   fbdo.setResponseSize(4095);
@@ -505,8 +515,6 @@ void setup()
   Firebase.reconnectWiFi(true);
 
   sensorRead();
-
-  Serial.println(MACADD);
 }
 
 void fcsDownloadCallback(FCS_DownloadStatusInfo info)
