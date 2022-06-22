@@ -51,6 +51,7 @@
 FirebaseData fbdo;
 FirebaseAuth auth;
 FirebaseConfig config;
+FirebaseJson json;
 
 DHT dht(DHTPIN, DHTTYPE);
 OneButton btn = OneButton(
@@ -266,8 +267,8 @@ void connectToWifi()
     Serial.println(docPathId);
   }
 
-  writeStringToFlash("", 0);
-  writeStringToFlash("", 40);
+  // writeStringToFlash("", 0);
+  // writeStringToFlash("", 40);
   // writeStringToFlash("", 80);
 
   // ssid = "Wifi saya";
@@ -313,7 +314,7 @@ void connectToWifi()
       btn.tick();
       Serial.print(".");
       lcd.setCursor(0, 1);
-      lcd.print("   Waiting WiFi   ");
+      lcd.print("    Waiting WiFi   ");
     }
 
     while (udpmsg)
@@ -372,6 +373,25 @@ void connectToWifi()
   lcd.print(" MIKIKO TECHNOLOGY ");
   lcd.setCursor(0, 1);
   lcd.print("--------------------");
+}
+
+void sensorRead()
+{
+  h = dht.readHumidity();
+  t = dht.readTemperature();
+  if (isnan(h) || isnan(t))
+  {
+    Serial.println(F("Failed to read from DHT sensor!"));
+    h = 0;
+    t = 0;
+  }
+
+  kelembabanTanah = map(analogRead(kelembabanTanahPin), 3745, 0, 0, 200);
+
+  int phADCval = analogRead(phTanahPin);
+  phADCval = map(phADCval, 0, 4095, 4, 45);
+
+  phTanahValue = (-0.0693 * phADCval) + 7.3855;
 }
 
 void setup()
@@ -483,6 +503,8 @@ void setup()
   fbdo.setResponseSize(4095);
   Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
+
+  sensorRead();
 
   Serial.println(MACADD);
 }
@@ -983,7 +1005,6 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -991,7 +1012,6 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -1005,7 +1025,6 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -1013,7 +1032,6 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -1032,7 +1050,6 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -1040,7 +1057,6 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -1054,7 +1070,6 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -1062,7 +1077,6 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -1076,7 +1090,6 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -1084,7 +1097,6 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -1098,7 +1110,6 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -1106,7 +1117,6 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -1125,7 +1135,6 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -1133,7 +1142,6 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -1147,7 +1155,6 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -1155,7 +1162,6 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -1169,7 +1175,6 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -1177,7 +1182,6 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -1191,7 +1195,6 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -1199,7 +1202,6 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -1208,6 +1210,58 @@ void scheduleAndAction()
   }
 
   // end action ========================================================================
+}
+
+void rainSensor()
+{
+  if (!digitalRead(pinSensorHujan) && hujan)
+  {
+    client.publish(String("/" + MACADD + "/data/weather"), "true", false);
+    hujan = false;
+  }
+
+  if (digitalRead(pinSensorHujan) && !hujan)
+  {
+    client.publish(String("/" + MACADD + "/data/weather"), "false", false);
+    hujan = true;
+  }
+}
+
+void sensorDisplay()
+{
+  if (millisTime - displayTime > 4000 && display1)
+  {
+    display2 = true;
+
+    lcd.setCursor(0, 2);
+    lcd.print("Temp = ");
+    lcd.print(t);
+    lcd.print((char)223);
+    lcd.print("C    ");
+    lcd.setCursor(0, 3);
+    lcd.print("Humidity = ");
+    lcd.print(h);
+    lcd.print(" % ");
+
+    displayTime = millisTime;
+    display1 = false;
+  }
+
+  if (millisTime - displayTime > 4000 && display2)
+  {
+    display1 = true;
+
+    lcd.setCursor(0, 2);
+    lcd.print("Ph tanah = ");
+    lcd.print("6,7   ");
+    lcd.setCursor(0, 3);
+    lcd.print("Soil RH = ");
+    lcd.print(kelembabanTanah);
+    lcd.print(" %      ");
+
+    displayTime = millisTime;
+    display2 = false;
+  }
 }
 
 void loop()
@@ -1225,5 +1279,22 @@ void loop()
   // Serial.print("get days from servr = ");
   // Serial.println(timeClient.getDay());
 
+  sensorRead();
+  rainSensor();
+  sensorDisplay();
   scheduleAndAction();
+
+  if (millisTime - sensorTime > 5 * 60 * 1000)
+  {
+
+    json.set("/temp", t);
+    json.set("/hum", h);
+    json.set("/soil", kelembabanTanah);
+    json.set("/ph", phTanahValue);
+    json.set("/time", getTime);
+
+    Firebase.RTDB.pushJSON(&fbdo, "/" + MACADD + "/Sensor", &json);
+
+    sensorTime = millisTime;
+  }
 }
