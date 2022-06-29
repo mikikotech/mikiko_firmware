@@ -61,6 +61,7 @@ OneButton btn = OneButton(
     false, // Button is active high
     false  // Disable internal pull-up resistor
 );
+
 Ticker ticker;
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 
@@ -90,12 +91,13 @@ String pss;  // string variable to store password
 String docPathId;
 String MACADD = WiFi.macAddress();
 
-String getTime;
+// String sendTime;
 uint8_t days;
 
 uint64_t millisTime = 0;
 uint64_t displayTime = 0;
 unsigned long int sensorTime = 0;
+unsigned long int rtdbTime = 0;
 
 bool udpmsg = true;
 bool wificheck = true;
@@ -118,6 +120,7 @@ int kelembabanTanah;
 
 String documentPath;
 String mask = "actions";
+String hour, minutes, sendTime;
 
 void writeStringToFlash(const char *toStore, int startAddr)
 {
@@ -286,7 +289,6 @@ void connectToWifi()
 
     while (WiFi.status() != WL_CONNECTED && wificheck == true)
     {
-      // delay(500);
       btn.tick();
       lcd.setCursor(0, 1);
       lcd.print("Trying Connect Wifi");
@@ -390,7 +392,16 @@ void sensorRead()
     t = 0;
   }
 
-  kelembabanTanah = map(analogRead(kelembabanTanahPin), 3745, 0, 0, 200);
+  kelembabanTanah = map(analogRead(kelembabanTanahPin), 4095, 0, 0, 100);
+
+  if (kelembabanTanah > 100)
+  {
+    kelembabanTanah = 100;
+  }
+  else if (kelembabanTanah < 0)
+  {
+    kelembabanTanah = 0;
+  }
 
   int phADCval = analogRead(phTanahPin);
   phADCval = map(phADCval, 0, 4095, 4, 45);
@@ -514,7 +525,35 @@ void setup()
   Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
 
+  hour = String(timeClient.getHours());
+  minutes = String(timeClient.getMinutes());
+
+  if (hour.length() == 1)
+  {
+    hour = String("0" + hour);
+  }
+
+  if (minutes.length() == 1)
+  {
+    minutes = String("0" + minutes);
+  }
+
+  sendTime = String(hour + ":" + minutes);
+
   sensorRead();
+
+  json.set("/temp", t);
+  json.set("/hum", h);
+  json.set("/soil", kelembabanTanah);
+  json.set("/ph", phTanahValue);
+  json.set("/time", sendTime);
+
+  Firebase.RTDB.pushJSON(&fbdo, "/" + MACADD + "/Sensor", &json);
+
+  Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/temp", t);
+  Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/humi", h);
+  Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/soil", kelembabanTanah);
+  Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/ph", phTanahValue);
 }
 
 void fcsDownloadCallback(FCS_DownloadStatusInfo info)
@@ -525,6 +564,7 @@ void fcsDownloadCallback(FCS_DownloadStatusInfo info)
     lcd.clear();
     lcd.setCursor(0, 1);
     lcd.print("Downloading firmware");
+    delay(1000);
   }
   else if (info.status == fb_esp_fcs_download_status_download)
   {
@@ -535,9 +575,16 @@ void fcsDownloadCallback(FCS_DownloadStatusInfo info)
   }
   else if (info.status == fb_esp_fcs_download_status_complete)
   {
+    lcd.clear();
+    lcd.setCursor(0, 1);
+    lcd.print("installing firmware!");
     Serial.println("Update firmware completed.");
     Serial.println();
     Serial.println("Restarting...\n\n");
+    delay(3000);
+    lcd.clear();
+    lcd.setCursor(8, 1);
+    lcd.print("Done");
     delay(1000);
     ESP.restart();
   }
@@ -549,6 +596,7 @@ void fcsDownloadCallback(FCS_DownloadStatusInfo info)
 
 void onConnectionEstablished()
 {
+  client.publish(String("/" + MACADD + "/data/weather"), "false", false);
   client.publish(String("/" + MACADD + "/data/firmwareversion"), FIRMWARE_VERSION, true);
   client.publish(MACADD.c_str(), "true", true);
 
@@ -663,13 +711,13 @@ void scheduleAndAction()
         bool status = schedule["schedule"][j]["mapValue"]["fields"]["status"]["booleanValue"];
         String time = schedule["schedule"][j]["mapValue"]["fields"]["time"]["stringValue"];
         uint8_t day = schedule["schedule"][j]["mapValue"]["fields"]["every"]["integerValue"];
-        if (time == getTime && status == true && days == day)
+        if (time == sendTime && status == true && days == day)
         {
           duration1 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
           vTaskResume(task1_handle);
           timmerCheck1 = false;
         }
-        else if (time == getTime && status == true && day > 7)
+        else if (time == sendTime && status == true && day > 7)
         {
           duration1 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
           vTaskResume(task1_handle);
@@ -684,13 +732,13 @@ void scheduleAndAction()
         bool status = schedule["schedule"][j]["mapValue"]["fields"]["status"]["booleanValue"];
         String time = schedule["schedule"][j]["mapValue"]["fields"]["time"]["stringValue"];
         uint8_t day = schedule["schedule"][j]["mapValue"]["fields"]["every"]["integerValue"];
-        if (time == getTime && status == true && days == day)
+        if (time == sendTime && status == true && days == day)
         {
           duration2 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
           vTaskResume(task2_handle);
           timmerCheck2 = false;
         }
-        else if (time == getTime && status == true && day > 7)
+        else if (time == sendTime && status == true && day > 7)
         {
           duration2 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
           vTaskResume(task2_handle);
@@ -705,13 +753,13 @@ void scheduleAndAction()
         bool status = schedule["schedule"][j]["mapValue"]["fields"]["status"]["booleanValue"];
         String time = schedule["schedule"][j]["mapValue"]["fields"]["time"]["stringValue"];
         uint8_t day = schedule["schedule"][j]["mapValue"]["fields"]["every"]["integerValue"];
-        if (time == getTime && status == true && days == day)
+        if (time == sendTime && status == true && days == day)
         {
           duration3 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
           vTaskResume(task3_handle);
           timmerCheck3 = false;
         }
-        else if (time == getTime && status == true && day > 7)
+        else if (time == sendTime && status == true && day > 7)
         {
           duration3 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
           vTaskResume(task3_handle);
@@ -728,13 +776,13 @@ void scheduleAndAction()
         uint8_t day = schedule["schedule"][j]["mapValue"]["fields"]["every"]["integerValue"];
         // Serial.print("time = ");
         // Serial.println(time);
-        if (time == getTime && status == true && days == day)
+        if (time == sendTime && status == true && days == day)
         {
           duration4 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
           vTaskResume(task4_handle);
           timmerCheck4 = false;
         }
-        else if (time == getTime && status == true && day > 7)
+        else if (time == sendTime && status == true && day > 7)
         {
           duration4 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
           vTaskResume(task4_handle);
@@ -749,13 +797,13 @@ void scheduleAndAction()
         bool status = schedule["schedule"][j]["mapValue"]["fields"]["status"]["booleanValue"];
         String time = schedule["schedule"][j]["mapValue"]["fields"]["time"]["stringValue"];
         uint8_t day = schedule["schedule"][j]["mapValue"]["fields"]["every"]["integerValue"];
-        if (time == getTime && status == true && days == day)
+        if (time == sendTime && status == true && days == day)
         {
           duration5 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
           vTaskResume(task5_handle);
           timmerCheck5 = false;
         }
-        else if (time == getTime && status == true && day > 7)
+        else if (time == sendTime && status == true && day > 7)
         {
           duration5 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
           vTaskResume(task5_handle);
@@ -772,11 +820,10 @@ void scheduleAndAction()
   for (int i = 0; i < actions["actions"].size(); i++)
   {
     String output = actions["actions"][i]["mapValue"]["fields"]["output"]["stringValue"];
-    Serial.println(output);
     if (output == "out1")
     {
       String con = actions["actions"][i]["mapValue"]["fields"]["if"]["stringValue"];
-      bool status = schedule["actions"][i]["mapValue"]["fields"]["status"]["booleanValue"];
+      bool status = actions["actions"][i]["mapValue"]["fields"]["status"]["booleanValue"];
       if (con == "temp" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
@@ -786,7 +833,6 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -794,7 +840,6 @@ void scheduleAndAction()
         {
           if (value <= t)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -808,7 +853,6 @@ void scheduleAndAction()
         {
           if (value >= h)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -816,7 +860,6 @@ void scheduleAndAction()
         {
           if (value <= h)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -830,7 +873,6 @@ void scheduleAndAction()
         {
           if (value >= kelembabanTanah)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -838,7 +880,6 @@ void scheduleAndAction()
         {
           if (value <= kelembabanTanah)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -852,7 +893,6 @@ void scheduleAndAction()
         {
           if (value >= phTanahValue)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -860,7 +900,6 @@ void scheduleAndAction()
         {
           if (value <= phTanahValue)
           {
-
             digitalWrite(out1, state);
           }
         }
@@ -869,7 +908,7 @@ void scheduleAndAction()
     else if (output == "out2")
     {
       String con = actions["actions"][i]["mapValue"]["fields"]["if"]["stringValue"];
-      bool status = schedule["actions"][i]["mapValue"]["fields"]["status"]["booleanValue"];
+      bool status = actions["actions"][i]["mapValue"]["fields"]["status"]["booleanValue"];
       if (con == "temp" && status == true)
       {
         int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
@@ -879,16 +918,14 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-
-            digitalWrite(out1, state);
+            digitalWrite(out2, state);
           }
         }
         else if (_con == "<=")
         {
           if (value <= t)
           {
-
-            digitalWrite(out1, state);
+            digitalWrite(out2, state);
           }
         }
       }
@@ -901,16 +938,14 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-
-            digitalWrite(out1, state);
+            digitalWrite(out2, state);
           }
         }
         else if (_con == "<=")
         {
           if (value <= t)
           {
-
-            digitalWrite(out1, state);
+            digitalWrite(out2, state);
           }
         }
       }
@@ -923,16 +958,14 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-
-            digitalWrite(out1, state);
+            digitalWrite(out2, state);
           }
         }
         else if (_con == "<=")
         {
           if (value <= t)
           {
-
-            digitalWrite(out1, state);
+            digitalWrite(out2, state);
           }
         }
       }
@@ -945,23 +978,21 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-
-            digitalWrite(out1, state);
+            digitalWrite(out2, state);
           }
         }
         else if (_con == "<=")
         {
           if (value <= t)
           {
-
-            digitalWrite(out1, state);
+            digitalWrite(out2, state);
           }
         }
       }
     }
     else if (output == "out3")
     {
-      bool status = schedule["actions"][i]["mapValue"]["fields"]["status"]["booleanValue"];
+      bool status = actions["actions"][i]["mapValue"]["fields"]["status"]["booleanValue"];
       String con = actions["actions"][i]["mapValue"]["fields"]["if"]["stringValue"];
       if (con == "temp" && status == true)
       {
@@ -972,15 +1003,14 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-
-            digitalWrite(out1, state);
+            digitalWrite(out3, state);
           }
         }
         else if (_con == "<=")
         {
           if (value <= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out3, state);
           }
         }
       }
@@ -993,14 +1023,14 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out3, state);
           }
         }
         else if (_con == "<=")
         {
           if (value <= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out3, state);
           }
         }
       }
@@ -1013,14 +1043,14 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out3, state);
           }
         }
         else if (_con == "<=")
         {
           if (value <= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out3, state);
           }
         }
       }
@@ -1033,21 +1063,21 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out3, state);
           }
         }
         else if (_con == "<=")
         {
           if (value <= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out3, state);
           }
         }
       }
     }
     else if (output == "out4")
     {
-      bool status = schedule["actions"][i]["mapValue"]["fields"]["status"]["booleanValue"];
+      bool status = actions["actions"][i]["mapValue"]["fields"]["status"]["booleanValue"];
       String con = actions["actions"][i]["mapValue"]["fields"]["if"]["stringValue"];
       if (con == "temp" && status == true)
       {
@@ -1058,14 +1088,14 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out4, state);
           }
         }
         else if (_con == "<=")
         {
           if (value <= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out4, state);
           }
         }
       }
@@ -1078,14 +1108,14 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out4, state);
           }
         }
         else if (_con == "<=")
         {
           if (value <= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out4, state);
           }
         }
       }
@@ -1098,14 +1128,14 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out4, state);
           }
         }
         else if (_con == "<=")
         {
           if (value <= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out4, state);
           }
         }
       }
@@ -1118,21 +1148,21 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out4, state);
           }
         }
         else if (_con == "<=")
         {
           if (value <= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out4, state);
           }
         }
       }
     }
     else if (output == "out5")
     {
-      bool status = schedule["actions"][i]["mapValue"]["fields"]["status"]["booleanValue"];
+      bool status = actions["actions"][i]["mapValue"]["fields"]["status"]["booleanValue"];
       String con = actions["actions"][i]["mapValue"]["fields"]["if"]["stringValue"];
       if (con == "temp" && status == true)
       {
@@ -1143,14 +1173,14 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out5, state);
           }
         }
         else if (_con == "<=")
         {
           if (value <= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out5, state);
           }
         }
       }
@@ -1163,14 +1193,14 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out5, state);
           }
         }
         else if (_con == "<=")
         {
           if (value <= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out5, state);
           }
         }
       }
@@ -1183,14 +1213,14 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out5, state);
           }
         }
         else if (_con == "<=")
         {
           if (value <= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out5, state);
           }
         }
       }
@@ -1203,14 +1233,14 @@ void scheduleAndAction()
         {
           if (value >= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out5, state);
           }
         }
         else if (_con == "<=")
         {
           if (value <= t)
           {
-            digitalWrite(out1, state);
+            digitalWrite(out5, state);
           }
         }
       }
@@ -1274,32 +1304,60 @@ void sensorDisplay()
 
 void loop()
 {
-
   client.loop();
-
-  btn.tick();
 
   millisTime = millis();
 
-  getTime = String(String(timeClient.getHours()) + ":" + String(timeClient.getMinutes()));
+  btn.tick();
+
+  hour = String(timeClient.getHours());
+  minutes = String(timeClient.getMinutes());
+
+  if (hour.length() == 1)
+  {
+    hour = String("0" + hour);
+  }
+
+  if (minutes.length() == 1)
+  {
+    minutes = String("0" + minutes);
+  }
+
+  sendTime = String(hour + ":" + minutes);
+
+  // sendTime = String(String(timeClient.getHours()) + ":" + String(timeClient.getMinutes()));
   days = timeClient.getDay();
 
-  // Serial.print("get days from servr = ");
-  // Serial.println(timeClient.getDay());
+  // Serial.println(sendTime);
+  // Serial.print("convert time = ");
+  // Serial.println(sendTime);
+
+  // delay(1000); // ================= remove
 
   sensorRead();
-  rainSensor();
+  // rainSensor();
   sensorDisplay();
+
   scheduleAndAction();
 
-  if (millisTime - sensorTime > 5 * 60 * 1000)
+  if (millisTime - rtdbTime > 5000)
+  {
+    Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/temp", t);
+    Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/humi", h);
+    Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/soil", kelembabanTanah);
+    Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/ph", phTanahValue);
+
+    rtdbTime = millisTime;
+  }
+
+  if (millisTime - sensorTime > 300000)
   {
 
     json.set("/temp", t);
     json.set("/hum", h);
     json.set("/soil", kelembabanTanah);
     json.set("/ph", phTanahValue);
-    json.set("/time", getTime);
+    json.set("/time", sendTime);
 
     Firebase.RTDB.pushJSON(&fbdo, "/" + MACADD + "/Sensor", &json);
 
