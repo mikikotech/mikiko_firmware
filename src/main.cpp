@@ -25,10 +25,10 @@
 // #define API_KEY "AIzaSyAMMrTWIU5gKeCDKwiLwO-7liVvfpT8u-M"
 // #define DATABASE_URL "https://mikiko-c5ca4-default-rtdb.firebaseio.com/"
 
-#define FIREBASE_PROJECT_ID "mikikov1"
-#define STORAGE_BUCKET_ID "mikikov1.appspot.com"
-#define API_KEY "AIzaSyDrtu0ZNYwh-rrG8TKplC0Sjlku7QTnOkY"
-#define DATABASE_URL "https://mikikov1-default-rtdb.firebaseio.com/"
+#define FIREBASE_PROJECT_ID "mikiko-c5ca4"
+#define STORAGE_BUCKET_ID "gs://mikiko-c5ca4.appspot.com"
+#define API_KEY "AIzaSyAMMrTWIU5gKeCDKwiLwO-7liVvfpT8u-M"
+#define DATABASE_URL "https://mikiko-c5ca4-default-rtdb.firebaseio.com/"
 
 // device info
 #define DEVICE_EMAIL "mikikoMTH@mikiko.com"
@@ -504,7 +504,9 @@ void setup()
   timeClient.setTimeOffset(8 * 3600);
   timeClient.forceUpdate();
 
-  documentPath = String(docPathId + "/" + MACADD);
+  // documentPath = String(docPathId + "/" + MACADD);
+
+  documentPath = String("devices/" + MACADD);
 
   /* Sign up */
   // if (Firebase.signUp(&config, &auth, "mikikotech@gmail.com", "Dalungww23"))
@@ -1291,7 +1293,7 @@ void sensorDisplay()
 
     lcd.setCursor(0, 2);
     lcd.print("Ph tanah = ");
-    lcd.print("6,7   ");
+    lcd.print(String(String(phTanahValue) + "   "));
     lcd.setCursor(0, 3);
     lcd.print("Soil RH = ");
     lcd.print(kelembabanTanah);
@@ -1363,4 +1365,6 @@ void loop()
 
     sensorTime = millisTime;
   }
+
+  delayMicroseconds(5);
 }
