@@ -26,7 +26,7 @@
 // device info
 #define DEVICE_EMAIL "mikikoMTH@mikiko.com"
 #define DEVICE_PASS "mikikoMTH"
-#define FIRMWARE_VERSION "0.0.1"
+#define FIRMWARE_VERSION "1.0.1"
 
 #define LENGTH(x) (strlen(x) + 1) // length of char string
 #define EEPROM_SIZE 200           // EEPROM size
