@@ -4,10 +4,11 @@
 #include <Firebase_ESP_Client.h>
 #include "addons/TokenHelper.h"
 #include "addons/RTDBHelper.h"
-
+#include "time.h"
 #include <Adafruit_Sensor.h>
 #include <AsyncUDP.h>
-#include <EspMQTTClient.h>
+#include <PubSubClient.h>
+// #include <EspMQTTClient.h>
 #include <WiFiUdp.h>
 #include "Update.h"
 #include "EEPROM.h"
@@ -15,15 +16,7 @@
 #include <LiquidCrystal_I2C.h>
 #include "OneButton.h"
 #include "DHT.h"
-#include <NTPClient.h>
-
-// #define WIFI_SSID "Mikikotech"
-// #define WIFI_PASSWORD "6jt/bulan"
-
-// #define FIREBASE_PROJECT_ID "mikiko-c5ca4"
-// #define STORAGE_BUCKET_ID "mikiko-c5ca4.appspot.com"
-// #define API_KEY "AIzaSyAMMrTWIU5gKeCDKwiLwO-7liVvfpT8u-M"
-// #define DATABASE_URL "https://mikiko-c5ca4-default-rtdb.firebaseio.com/"
+#include <CronAlarms.h>
 
 #define FIREBASE_PROJECT_ID "mikiko-c5ca4"
 #define STORAGE_BUCKET_ID "gs://mikiko-c5ca4.appspot.com"
@@ -43,12 +36,24 @@
 
 #define out1 13 // relay
 #define out2 18 // solenoid1
-#define out3 0  // pin GPIO2 atau GPIO4  // solenoid2
-#define out4 2  // pin GPIO0 atau GPIO16 // solenoid3
+#define out3 4  // pin GPIO2 atau GPIO4  // solenoid2
+#define out4 16 // pin GPIO0 atau GPIO16 // solenoid3
 #define out5 5  // solenoid4
 #define pinSensorHujan 26
 #define phTanahPin A0
 #define kelembabanTanahPin A1
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+struct tm timeinfo;
+
+String uniq_username = String("MIKIKO" + WiFi.macAddress());
+
+const char *mqtt_broker = "broker.hivemq.com";
+const char *mqtt_username = uniq_username.c_str();
+const char *mqtt_password = "mikiko";
+const int mqtt_port = 1883;
 
 FirebaseData fbdo;
 FirebaseAuth auth;
@@ -66,33 +71,24 @@ Ticker ticker;
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 
 WiFiUDP udp;
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP);
-// HTTPClient http;
 
-DynamicJsonDocument actions(2048);
-DynamicJsonDocument schedule(2048);
-
-TaskHandle_t task1_handle = NULL;
-TaskHandle_t task2_handle = NULL;
-TaskHandle_t task3_handle = NULL;
-TaskHandle_t task4_handle = NULL;
-TaskHandle_t task5_handle = NULL;
-
-unsigned long sendDataPrevMillis = 0;
-int count = 0;
-bool signupOK = false;
-
-char udpbuf[255];
-char replyPacket[] = "MTH:5CH:MIKIKO";
+char udpbuf[3];
+// char replyPacket[] = "MTH:5CH:MIKIKO";
 
 String ssid; // string variable to store ssid
 String pss;  // string variable to store password
-String docPathId;
+String gmt;
 String MACADD = WiFi.macAddress();
 
-// String sendTime;
-uint8_t days;
+String topic1;
+String topic2;
+String topic3;
+String topic4;
+String topic5;
+String fwVersion_topic;
+String fwUpdate_topic;
+String fwRespone_topic;
+String schedule_topic;
 
 uint64_t millisTime = 0;
 uint64_t displayTime = 0;
@@ -104,23 +100,84 @@ bool wificheck = true;
 bool display1 = true;
 bool display2 = false;
 bool hujan = true;
-bool timmerCheck1 = true;
-bool timmerCheck2 = true;
-bool timmerCheck3 = true;
-bool timmerCheck4 = true;
-bool timmerCheck5 = true;
 
-int duration1;
-int duration2;
-int duration3;
-int duration4;
-int duration5;
 float t, h, phTanahValue;
 int kelembabanTanah;
 
 String documentPath;
 String mask = "actions";
 String hour, minutes, sendTime;
+
+void out1_on()
+{
+  digitalWrite(out1, LOW);
+  Serial.println("out 1 on");
+
+  client.publish(topic1.c_str(), "true", true);
+}
+
+void out1_off()
+{
+  digitalWrite(out1, HIGH);
+  Serial.println("out 1 off");
+  client.publish(topic1.c_str(), "false", true);
+}
+
+void out2_on()
+{
+  digitalWrite(out2, HIGH);
+  Serial.println("out 2 on");
+  client.publish(topic2.c_str(), "true", true);
+}
+
+void out2_off()
+{
+  digitalWrite(out2, LOW);
+  Serial.println("out 2 off");
+  client.publish(topic2.c_str(), "false", true);
+}
+
+void out3_on()
+{
+  digitalWrite(out3, HIGH);
+  Serial.println("out 3 on");
+  client.publish(topic3.c_str(), "true", true);
+}
+
+void out3_off()
+{
+  digitalWrite(out3, LOW);
+  Serial.println("out 3 off");
+  client.publish(topic3.c_str(), "false", true);
+}
+
+void out4_on()
+{
+  digitalWrite(out4, HIGH);
+  Serial.println("out 4 on");
+  client.publish(topic4.c_str(), "true", true);
+}
+
+void out4_off()
+{
+  digitalWrite(out4, LOW);
+  Serial.println("out 4 off");
+  client.publish(topic4.c_str(), "false", true);
+}
+
+void out5_on()
+{
+  digitalWrite(out5, HIGH);
+  Serial.println("out 5 on");
+  client.publish(topic5.c_str(), "true", true);
+}
+
+void out5_off()
+{
+  digitalWrite(out5, LOW);
+  Serial.println("out 5 off");
+  client.publish(topic5.c_str(), "false", true);
+}
 
 void writeStringToFlash(const char *toStore, int startAddr)
 {
@@ -167,219 +224,11 @@ void btnLongPress()
 {
   writeStringToFlash("", 0);  // Reset the SSID
   writeStringToFlash("", 40); // Reset the Password
-  writeStringToFlash("", 80); // Reset docPathId
+  writeStringToFlash("", 80); // Reset gmt
   Serial.println("Wifi credentials erased");
   Serial.println("Restarting the ESP");
   delay(500);
   ESP.restart();
-}
-
-EspMQTTClient client(
-    ssid.c_str(),
-    pss.c_str(),
-    "broker.hivemq.com",
-    MACADD.c_str(),
-    1883);
-
-void timmerOne(void *parameter)
-{
-  for (;;)
-  { // infinite loop
-
-    digitalWrite(out1, LOW);
-    vTaskDelay((duration1 * 60 * 1000) / portTICK_PERIOD_MS);
-    digitalWrite(out1, HIGH);
-    timmerCheck1 = true;
-
-    vTaskSuspend(task1_handle);
-  }
-}
-
-void timmerTwo(void *parameter)
-{
-  for (;;)
-  {
-
-    digitalWrite(out2, HIGH);
-    vTaskDelay((duration2 * 60 * 1000) / portTICK_PERIOD_MS);
-    digitalWrite(out2, LOW);
-    timmerCheck2 = true;
-
-    vTaskSuspend(task2_handle);
-  }
-}
-
-void timmerThree(void *parameter)
-{
-  for (;;)
-  {
-
-    digitalWrite(out3, HIGH);
-    vTaskDelay((duration3 * 60 * 1000) / portTICK_PERIOD_MS);
-    digitalWrite(out3, LOW);
-    timmerCheck3 = true;
-
-    vTaskSuspend(task3_handle);
-  }
-}
-
-void timmerFour(void *parameter)
-{
-  for (;;)
-  {
-
-    digitalWrite(out4, HIGH);
-    vTaskDelay((duration4 * 60 * 1000) / portTICK_PERIOD_MS);
-    digitalWrite(out4, LOW);
-    timmerCheck4 = true;
-
-    vTaskSuspend(task4_handle);
-  }
-}
-
-void timmerFive(void *parameter)
-{
-  for (;;)
-  {
-
-    digitalWrite(out5, HIGH);
-    vTaskDelay((duration5 * 60 * 1000) / portTICK_PERIOD_MS);
-    digitalWrite(out5, LOW);
-    timmerCheck5 = true;
-
-    vTaskSuspend(task5_handle);
-  }
-}
-
-void connectToWifi()
-{
-
-  if (!EEPROM.begin(EEPROM_SIZE))
-  { // Init EEPROM
-    Serial.println("failed to init EEPROM");
-    delay(1000);
-  }
-  else
-  {
-    ssid = readStringFromFlash(0); // Read SSID stored at address 0
-    Serial.print("SSID = ");
-    Serial.println(ssid);
-    pss = readStringFromFlash(40); // Read Password stored at address 40
-    Serial.print("psss = ");
-    Serial.println(pss);
-    docPathId = readStringFromFlash(80); // Read Password stored at address 80
-    Serial.print("docpathid = ");
-    Serial.println(docPathId);
-  }
-
-  // writeStringToFlash("", 0);
-  // writeStringToFlash("", 40);
-  // writeStringToFlash("", 80);
-
-  // ssid = "Wifi saya";
-  // pss = "1sampai9";
-
-  WiFi.mode(WIFI_AP_STA);
-
-  uint8_t cnt = 0;
-
-  if (ssid.length() > 0 && pss.length() > 0)
-  {
-    WiFi.begin(ssid.c_str(), pss.c_str());
-
-    while (WiFi.status() != WL_CONNECTED && wificheck == true)
-    {
-      btn.tick();
-      lcd.setCursor(0, 1);
-      lcd.print("Trying Connect Wifi");
-      Serial.print("-");
-      if (cnt > 5000)
-      {
-        wificheck = false;
-        writeStringToFlash("", 0);  // Reset the SSID
-        writeStringToFlash("", 40); // Reset the Password
-        writeStringToFlash("", 80); // Reset docPathId
-        break;
-      }
-      cnt++;
-    }
-    lcd.clear();
-    lcd.setCursor(3, 1);
-    lcd.print("Connecting to ");
-    lcd.setCursor((20 - ssid.length()) / 2, 2);
-    lcd.print(ssid);
-  }
-
-  if (WiFi.status() != WL_CONNECTED) // if WiFi is not connected
-  {
-    WiFi.beginSmartConfig();
-
-    udp.begin(2255);
-
-    while (WiFi.status() != WL_CONNECTED)
-    {
-      btn.tick();
-      Serial.print(".");
-      lcd.setCursor(0, 1);
-      lcd.print("    Waiting WiFi   ");
-    }
-
-    while (udpmsg)
-    {
-      btn.tick();
-      if (udp.parsePacket())
-      {
-        udp.read(udpbuf, 255);
-        Serial.print("message = ");
-        Serial.print(udpbuf);
-        writeStringToFlash(udpbuf, 80); // storing docPathId at address 40
-        docPathId = String(udpbuf);
-        Serial.print(", from =");
-        Serial.print(udp.remoteIP());
-
-        udp.beginPacket(udp.remoteIP(), 2255);
-        int i = 0;
-        while (replyPacket[i] != 0)
-          udp.write((uint8_t)replyPacket[i++]);
-        Serial.print("udp send = ");
-        Serial.println(replyPacket);
-        udp.endPacket();
-        udp.flush();
-        udpmsg = false;
-      }
-    }
-
-    ssid = WiFi.SSID();
-    pss = WiFi.psk();
-
-    lcd.clear();
-    lcd.setCursor(3, 1);
-    lcd.print("Connecting to ");
-    lcd.setCursor((20 - ssid.length()) / 2, 2);
-    lcd.print(ssid);
-
-    WiFi.stopSmartConfig();
-
-    Serial.println("WiFi Connected.");
-
-    Serial.print("IP Address: ");
-    Serial.println(WiFi.localIP());
-
-    writeStringToFlash(ssid.c_str(), 0); // storing ssid at address 0
-    writeStringToFlash(pss.c_str(), 40); // storing pss at address 40
-  }
-
-  delay(2000);
-
-  lcd.clear();
-  lcd.setCursor(4, 1);
-  lcd.print("Connected !!");
-  delay(2000);
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print(" MIKIKO TECHNOLOGY ");
-  lcd.setCursor(0, 1);
-  lcd.print("--------------------");
 }
 
 void sensorRead()
@@ -407,155 +256,6 @@ void sensorRead()
   phADCval = map(phADCval, 0, 4095, 4, 45);
 
   phTanahValue = (-0.0693 * phADCval) + 7.3855;
-}
-
-void setup()
-{
-  Serial.begin(115200);
-
-  xTaskCreatePinnedToCore(
-      timmerOne,     // Function that should be called
-      "timmer 1",    // Name of the task (for debugging)
-      1000,          // Stack size (bytes)
-      NULL,          // Parameter to pass
-      1,             // Task priority
-      &task1_handle, // Task handle
-      0);
-
-  xTaskCreatePinnedToCore(
-      timmerTwo,     // Function that should be called
-      "timmer 2",    // Name of the task (for debugging)
-      1000,          // Stack size (bytes)
-      NULL,          // Parameter to pass
-      1,             // Task priority
-      &task2_handle, // Task handle
-      0);
-
-  xTaskCreatePinnedToCore(
-      timmerThree,   // Function that should be called
-      "timmer 3",    // Name of the task (for debugging)
-      1000,          // Stack size (bytes)
-      NULL,          // Parameter to pass
-      1,             // Task priority
-      &task3_handle, // Task handle
-      0);
-
-  xTaskCreatePinnedToCore(
-      timmerFour,    // Function that should be called
-      "timmer 4",    // Name of the task (for debugging)
-      1000,          // Stack size (bytes)
-      NULL,          // Parameter to pass
-      1,             // Task priority
-      &task4_handle, // Task handle
-      0);
-
-  xTaskCreatePinnedToCore(
-      timmerFive,    // Function that should be called
-      "timmer 5",    // Name of the task (for debugging)
-      1000,          // Stack size (bytes)
-      NULL,          // Parameter to pass
-      1,             // Task priority
-      &task5_handle, // Task handle
-      0);
-
-  vTaskSuspend(task1_handle);
-  vTaskSuspend(task2_handle);
-  vTaskSuspend(task3_handle);
-  vTaskSuspend(task4_handle);
-  vTaskSuspend(task5_handle);
-
-  MACADD = String(WiFi.macAddress());
-
-  MACADD = getValue(MACADD, 58, 0) + getValue(MACADD, 58, 1) + getValue(MACADD, 58, 2) + getValue(MACADD, 58, 3) + getValue(MACADD, 58, 4) + getValue(MACADD, 58, 5);
-  MACADD.toLowerCase();
-
-  Serial.println(MACADD);
-
-  lcd.begin();
-  lcd.backlight();
-  dht.begin();
-  btn.tick();
-
-  pinMode(BUILTIN_LED, OUTPUT);
-  pinMode(pinSensorHujan, INPUT);
-  pinMode(23, INPUT);
-  pinMode(out2, OUTPUT);
-  pinMode(out3, OUTPUT);
-  pinMode(out4, OUTPUT);
-  pinMode(out5, OUTPUT);
-  pinMode(out1, OUTPUT);
-
-  digitalWrite(out1, HIGH);
-
-  btn.attachLongPressStart(btnLongPress);
-  btn.setPressTicks(2000);
-
-  connectToWifi();
-
-  // client.enableDebuggingMessages();
-  client.enableHTTPWebUpdater(MACADD.c_str(), "");
-  // client.enableOTA();
-  client.enableLastWillMessage(MACADD.c_str(), "false", true);
-
-  config.api_key = API_KEY;
-  config.database_url = DATABASE_URL;
-
-  timeClient.begin();
-  timeClient.setTimeOffset(8 * 3600);
-  timeClient.forceUpdate();
-
-  // documentPath = String(docPathId + "/" + MACADD);
-
-  documentPath = String("devices/" + MACADD);
-
-  /* Sign up */
-  // if (Firebase.signUp(&config, &auth, "mikikotech@gmail.com", "Dalungww23"))
-  // {
-  //   signupOK = true;
-  // }
-  // else
-  // {
-  //   Serial.printf("%s\n", config.signer.signupError.message.c_str());
-  // }
-
-  auth.user.email = DEVICE_EMAIL;
-  auth.user.password = DEVICE_PASS;
-
-  config.token_status_callback = tokenStatusCallback;
-
-  fbdo.setResponseSize(4095);
-  Firebase.begin(&config, &auth);
-  Firebase.reconnectWiFi(true);
-
-  hour = String(timeClient.getHours());
-  minutes = String(timeClient.getMinutes());
-
-  if (hour.length() == 1)
-  {
-    hour = String("0" + hour);
-  }
-
-  if (minutes.length() == 1)
-  {
-    minutes = String("0" + minutes);
-  }
-
-  sendTime = String(hour + ":" + minutes);
-
-  sensorRead();
-
-  json.set("/temp", t);
-  json.set("/hum", h);
-  json.set("/soil", kelembabanTanah);
-  json.set("/ph", phTanahValue);
-  json.set("/time", sendTime);
-
-  Firebase.RTDB.pushJSON(&fbdo, "/" + MACADD + "/Sensor", &json);
-
-  Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/temp", t);
-  Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/humi", h);
-  Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/soil", kelembabanTanah);
-  Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/ph", phTanahValue);
 }
 
 void fcsDownloadCallback(FCS_DownloadStatusInfo info)
@@ -596,676 +296,806 @@ void fcsDownloadCallback(FCS_DownloadStatusInfo info)
   }
 }
 
-void onConnectionEstablished()
+void mqtt_process(char *topic, byte *payload)
 {
-  client.publish(String("/" + MACADD + "/data/weather"), "false", false);
-  client.publish(String("/" + MACADD + "/data/firmwareversion"), FIRMWARE_VERSION, true);
-  client.publish(MACADD.c_str(), "true", true);
 
-  client.subscribe(String("/" + MACADD + "/data/btnone"), [](const String &payload)
-                   {
-                     Serial.println(payload);
+  String msg;
+  String strTopic;
 
-                     if (payload == "true")
-                     {
-                       digitalWrite(out1, LOW);
-                     }
-                     else
-                     {
-                       digitalWrite(out1, HIGH);
-                     } });
-  client.subscribe(String("/" + MACADD + "/data/btntwo"), [](const String &payload)
-                   {
-                     Serial.println(payload);
+  strTopic = String((char *)topic);
+  if (strTopic == topic1)
+  {
 
-                     if (payload == "true")
-                     {
-                       digitalWrite(out2, HIGH);
-                     }
-                     else
-                     {
-                       digitalWrite(out2, LOW);
-                     } });
+    msg = String((char *)payload);
 
-  client.subscribe(String("/" + MACADD + "/data/btnthree"), [](const String &payload)
-                   {
-                     Serial.println(payload);
+    Serial.println(msg);
 
-                     if (payload == "true")
-                     {
-                       digitalWrite(out3, HIGH);
-                     }
-                     else
-                     {
-                       digitalWrite(out3, LOW);
-                     } });
+    if (msg == "true")
+    {
+      digitalWrite(out1, LOW);
+    }
+    else
+    {
+      digitalWrite(out1, HIGH);
+    }
+  }
+  else if (strTopic == topic2)
+  {
 
-  client.subscribe(String("/" + MACADD + "/data/btnfour"), [](const String &payload)
-                   {
-                     Serial.println(payload);
+    msg = String((char *)payload);
 
-                     if (payload == "true")
-                     {
-                       digitalWrite(out4, HIGH);
-                     }
-                     else
-                     {
-                       digitalWrite(out4, LOW);
-                     } });
+    Serial.println(msg);
 
-  client.subscribe(String("/" + MACADD + "/data/btnfive"), [](const String &payload)
-                   {
-                     Serial.println(payload);
+    if (msg == "true")
+    {
+      digitalWrite(out2, HIGH);
+    }
+    else
+    {
+      digitalWrite(out2, LOW);
+    }
+  }
+  else if (strTopic == topic3)
+  {
 
-                     if (payload == "true")
-                     {
-                       digitalWrite(out5, HIGH);
-                     }
-                     else
-                     {
-                       digitalWrite(out5, LOW);
-                     } });
+    msg = String((char *)payload);
 
-  client.subscribe(String("/" + MACADD + "/data/ota"), [](const String &payload)
-                   {if(payload == "true"){
-                     if (!Firebase.Storage.downloadOTA(&fbdo, STORAGE_BUCKET_ID, "MTH/firmware.bin", fcsDownloadCallback))
-                        Serial.println(fbdo.errorReason());
-                    } });
+    Serial.println(msg);
 
-  client.subscribe(String("/" + MACADD + "/data/actions"), [](const String &payload)
-                   {if(payload == "true"){
-                    // get data from firestore
-                    if (Firebase.Firestore.getDocument(&fbdo, FIREBASE_PROJECT_ID, "", documentPath.c_str(), "actions")){
-                      Serial.printf("ok\n%s\n\n", fbdo.payload().c_str());
-                      deserializeJson(actions, fbdo.payload());
-                      actions["actions"] = actions["fields"]["actions"]["arrayValue"]["values"];
-                    }else{
-                      Serial.println(fbdo.errorReason());
-                    }
-                    } });
+    if (msg == "true")
+    {
+      digitalWrite(out3, HIGH);
+    }
+    else
+    {
+      digitalWrite(out3, LOW);
+    }
+  }
+  else if (strTopic == topic4)
+  {
+    msg = String((char *)payload);
 
-  client.subscribe(String("/" + MACADD + "/data/schedule"), [](const String &payload)
-                   {if(payload == "true"){
-                    // get data from firestore
-                    if (Firebase.Firestore.getDocument(&fbdo, FIREBASE_PROJECT_ID, "", documentPath.c_str(), "schedule")){
-                      Serial.printf("ok\n%s\n\n", fbdo.payload().c_str());
-                      deserializeJson(schedule, fbdo.payload());
-                      schedule["schedule"] = schedule["fields"]["schedule"]["arrayValue"]["values"];
-                    }else{
-                      Serial.println(fbdo.errorReason());
-                    }
-                    } });
+    Serial.println(msg);
+
+    if (msg == "true")
+    {
+      digitalWrite(out4, HIGH);
+    }
+    else
+    {
+      digitalWrite(out4, LOW);
+    }
+  }
+  else if (strTopic == topic5)
+  {
+    msg = String((char *)payload);
+
+    Serial.println(msg);
+
+    if (msg == "true")
+    {
+      digitalWrite(out5, HIGH);
+    }
+    else
+    {
+      digitalWrite(out5, LOW);
+    }
+  }
+  else if (strTopic == "data/t")
+  {
+
+    msg = String((char *)payload);
+
+    Cron.create(msg.c_str(), out1_on, false);
+  }
+  else if (strTopic == fwUpdate_topic)
+  {
+    if (!Firebase.Storage.downloadOTA(&fbdo, STORAGE_BUCKET_ID, "/SONMIKIKO/firmware.bin", fcsDownloadCallback))
+      Serial.println(fbdo.errorReason());
+    // gs://mikiko-c5ca4.appspot.com/SONMIKIKO/firmware.bin
+  }
+  else if (strTopic == schedule_topic)
+  {
+
+    DynamicJsonDocument schedule(2045 * 2);
+    StaticJsonDocument<114> filter;
+
+    filter["fields"]["schedule"]["arrayValue"]["values"][0]["mapValue"] = true;
+
+    if (Firebase.Firestore.getDocument(&fbdo, FIREBASE_PROJECT_ID, "", documentPath.c_str(), "schedule"))
+    {
+      Serial.printf("ok\n%s\n\n", fbdo.payload().c_str());
+
+      for (byte i = 0; i < 51; i++)
+      {
+        Cron.free(i);
+      }
+
+      DeserializationError error = deserializeJson(schedule, fbdo.payload().c_str(), DeserializationOption::Filter(filter));
+
+      if (error)
+      {
+        Serial.print(F("deserializeJson() failed: "));
+        Serial.println(error.f_str());
+        return;
+      }
+
+      for (int j = 0; j < schedule["fields"]["schedule"]["arrayValue"]["values"].size(); j++)
+      {
+        // String cron_id = schedule["fields"]["schedule"]["arrayValue"]["values"][j]["mapValue"]["fields"]["id"]["stringValue"];
+        String cron_data = schedule["fields"]["schedule"]["arrayValue"]["values"][j]["mapValue"]["fields"]["data"]["stringValue"];
+        String cron_string = getValue(cron_data, 58, 0);
+        String output = getValue(cron_data, 58, 1);
+        bool state = getValue(cron_data, 58, 2) == "1" ? true : false;
+        bool status = getValue(cron_data, 58, 3) == "1" ? true : false;
+
+        // Serial.print("cron is =");
+        // Serial.print(cron_string);
+        // Serial.println("end");
+        // Serial.print("output is = ");
+        // Serial.println(output);
+        // Serial.print("status is = ");
+        // Serial.println(state);
+        // Serial.print("repeat is = ");
+        // Serial.println(repeat);
+        // Serial.print("status is = ");
+        // Serial.println(status);
+
+        if (output == "out1" && status == true)
+        {
+          // if (repeat == true)
+          // {
+          //   if (state == true)
+          //   {
+          //     Cron.create(cron_string.c_str(), out1_on_once, true);
+          //   }
+          //   else
+          //   {
+          //     Cron.create(cron_string.c_str(), out1_off_once, true);
+          //   }
+          // }
+          // else
+          // {
+          if (state == true)
+          {
+            Cron.create(cron_string.c_str(), out1_on, false);
+          }
+          else
+          {
+            Cron.create(cron_string.c_str(), out1_off, false);
+          }
+          // }
+        }
+        else if (output == "out2" && status == true)
+        {
+          // if (repeat == true)
+          // {
+          //   if (state == true)
+          //   {
+          //     Cron.create(cron_string.c_str(), out2_on_once, true);
+          //   }
+          //   else
+          //   {
+          //     Cron.create(cron_string.c_str(), out2_off_once, true);
+          //   }
+          // }
+          // else
+          // {
+          if (state == true)
+          {
+            Cron.create(cron_string.c_str(), out2_on, false);
+          }
+          else
+          {
+            Cron.create(cron_string.c_str(), out2_off, false);
+          }
+          // }
+        }
+        else if (output == "out3" && status == true)
+        {
+          // if (repeat == true)
+          // {
+          //   if (state == true)
+          //   {
+          //     Cron.create(cron_string.c_str(), out3_on_once, true);
+          //   }
+          //   else
+          //   {
+          //     Cron.create(cron_string.c_str(), out3_off_once, true);
+          //   }
+          // }
+          // else
+          // {
+          if (state == true)
+          {
+            Cron.create(cron_string.c_str(), out3_on, false);
+          }
+          else
+          {
+            Cron.create(cron_string.c_str(), out3_off, false);
+          }
+          // }
+        }
+        else if (output == "out4" && status == true)
+        {
+          // if (repeat == true)
+          // {
+          //   if (state == true)
+          //   {
+          //     Cron.create(cron_string.c_str(), out4_on_once, true);
+          //   }
+          //   else
+          //   {
+          //     Cron.create(cron_string.c_str(), out4_off_once, true);
+          //   }
+          // }
+          // else
+          // {
+          if (state == true)
+          {
+            Cron.create(cron_string.c_str(), out4_on, false);
+          }
+          else
+          {
+            Cron.create(cron_string.c_str(), out4_off, false);
+          }
+        }
+        else if (output == "out5" && status == true)
+        {
+          // if (repeat == true)
+          // {
+          //   if (state == true)
+          //   {
+          //     Cron.create(cron_string.c_str(), out4_on_once, true);
+          //   }
+          //   else
+          //   {
+          //     Cron.create(cron_string.c_str(), out4_off_once, true);
+          //   }
+          // }
+          // else
+          // {
+          if (state == true)
+          {
+            Cron.create(cron_string.c_str(), out5_on, false);
+          }
+          else
+          {
+            Cron.create(cron_string.c_str(), out5_off, false);
+          }
+          // }
+        }
+      }
+    }
+    else
+    {
+      Serial.println(fbdo.errorReason());
+    }
+
+    schedule.clear();
+  }
 }
 
-void scheduleAndAction()
+void callback(char *topic, byte *payload, unsigned int length)
 {
-  // schedule check======================================================================
+  payload[length] = '\0';
+  Serial.print("Message arrived in topic: ");
+  Serial.println(topic);
 
-  for (int j = 0; j < schedule["schedule"].size(); j++)
+  Serial.print("Message:");
+  for (int i = 0; i < length; i++)
   {
-    String output = schedule["schedule"][j]["mapValue"]["fields"]["output"]["stringValue"];
-    // Serial.print("output = ");
-    // Serial.println(output);
-    if (output == "out1")
-    {
-      if (timmerCheck1 == true)
-      {
-        bool status = schedule["schedule"][j]["mapValue"]["fields"]["status"]["booleanValue"];
-        String time = schedule["schedule"][j]["mapValue"]["fields"]["time"]["stringValue"];
-        uint8_t day = schedule["schedule"][j]["mapValue"]["fields"]["every"]["integerValue"];
-        if (time == sendTime && status == true && days == day)
-        {
-          duration1 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
-          vTaskResume(task1_handle);
-          timmerCheck1 = false;
-        }
-        else if (time == sendTime && status == true && day > 7)
-        {
-          duration1 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
-          vTaskResume(task1_handle);
-          timmerCheck1 = false;
-        }
-      }
-    }
-    else if (output == "out2")
-    {
-      if (timmerCheck2 == true)
-      {
-        bool status = schedule["schedule"][j]["mapValue"]["fields"]["status"]["booleanValue"];
-        String time = schedule["schedule"][j]["mapValue"]["fields"]["time"]["stringValue"];
-        uint8_t day = schedule["schedule"][j]["mapValue"]["fields"]["every"]["integerValue"];
-        if (time == sendTime && status == true && days == day)
-        {
-          duration2 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
-          vTaskResume(task2_handle);
-          timmerCheck2 = false;
-        }
-        else if (time == sendTime && status == true && day > 7)
-        {
-          duration2 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
-          vTaskResume(task2_handle);
-          timmerCheck2 = false;
-        }
-      }
-    }
-    else if (output == "out3")
-    {
-      if (timmerCheck3 == true)
-      {
-        bool status = schedule["schedule"][j]["mapValue"]["fields"]["status"]["booleanValue"];
-        String time = schedule["schedule"][j]["mapValue"]["fields"]["time"]["stringValue"];
-        uint8_t day = schedule["schedule"][j]["mapValue"]["fields"]["every"]["integerValue"];
-        if (time == sendTime && status == true && days == day)
-        {
-          duration3 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
-          vTaskResume(task3_handle);
-          timmerCheck3 = false;
-        }
-        else if (time == sendTime && status == true && day > 7)
-        {
-          duration3 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
-          vTaskResume(task3_handle);
-          timmerCheck3 = false;
-        }
-      }
-    }
-    else if (output == "out4")
-    {
-      if (timmerCheck4 == true)
-      {
-        bool status = schedule["schedule"][j]["mapValue"]["fields"]["status"]["booleanValue"];
-        String time = schedule["schedule"][j]["mapValue"]["fields"]["time"]["stringValue"];
-        uint8_t day = schedule["schedule"][j]["mapValue"]["fields"]["every"]["integerValue"];
-        // Serial.print("time = ");
-        // Serial.println(time);
-        if (time == sendTime && status == true && days == day)
-        {
-          duration4 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
-          vTaskResume(task4_handle);
-          timmerCheck4 = false;
-        }
-        else if (time == sendTime && status == true && day > 7)
-        {
-          duration4 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
-          vTaskResume(task4_handle);
-          timmerCheck4 = false;
-        }
-      }
-    }
-    else if (output == "out5")
-    {
-      if (timmerCheck5 == true)
-      {
-        bool status = schedule["schedule"][j]["mapValue"]["fields"]["status"]["booleanValue"];
-        String time = schedule["schedule"][j]["mapValue"]["fields"]["time"]["stringValue"];
-        uint8_t day = schedule["schedule"][j]["mapValue"]["fields"]["every"]["integerValue"];
-        if (time == sendTime && status == true && days == day)
-        {
-          duration5 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
-          vTaskResume(task5_handle);
-          timmerCheck5 = false;
-        }
-        else if (time == sendTime && status == true && day > 7)
-        {
-          duration5 = schedule["schedule"][j]["mapValue"]["fields"]["duration"]["integerValue"];
-          vTaskResume(task5_handle);
-          timmerCheck5 = false;
-        }
-      }
-    }
+    Serial.print((char)payload[i]);
   }
 
-  // end schedule=========================================================================
+  Serial.println();
+  Serial.println("-----------------------");
 
-  // action check ========================================================================
-
-  for (int i = 0; i < actions["actions"].size(); i++)
-  {
-    String output = actions["actions"][i]["mapValue"]["fields"]["output"]["stringValue"];
-    if (output == "out1")
-    {
-      String con = actions["actions"][i]["mapValue"]["fields"]["if"]["stringValue"];
-      bool status = actions["actions"][i]["mapValue"]["fields"]["status"]["booleanValue"];
-      if (con == "temp" && status == true)
-      {
-        int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
-        String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
-        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
-        if (_con == ">=")
-        {
-          if (value >= t)
-          {
-            digitalWrite(out1, state);
-          }
-        }
-        else if (_con == "<=")
-        {
-          if (value <= t)
-          {
-            digitalWrite(out1, state);
-          }
-        }
-      }
-      else if (con == "humi" && status == true)
-      {
-        int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
-        String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
-        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
-        if (_con == ">=")
-        {
-          if (value >= h)
-          {
-            digitalWrite(out1, state);
-          }
-        }
-        else if (_con == "<=")
-        {
-          if (value <= h)
-          {
-            digitalWrite(out1, state);
-          }
-        }
-      }
-      else if (con == "soil" && status == true)
-      {
-        int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
-        String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
-        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
-        if (_con == ">=")
-        {
-          if (value >= kelembabanTanah)
-          {
-            digitalWrite(out1, state);
-          }
-        }
-        else if (_con == "<=")
-        {
-          if (value <= kelembabanTanah)
-          {
-            digitalWrite(out1, state);
-          }
-        }
-      }
-      else if (con == "ph" && status == true)
-      {
-        int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
-        String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
-        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
-        if (_con == ">=")
-        {
-          if (value >= phTanahValue)
-          {
-            digitalWrite(out1, state);
-          }
-        }
-        else if (_con == "<=")
-        {
-          if (value <= phTanahValue)
-          {
-            digitalWrite(out1, state);
-          }
-        }
-      }
-    }
-    else if (output == "out2")
-    {
-      String con = actions["actions"][i]["mapValue"]["fields"]["if"]["stringValue"];
-      bool status = actions["actions"][i]["mapValue"]["fields"]["status"]["booleanValue"];
-      if (con == "temp" && status == true)
-      {
-        int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
-        String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
-        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
-        if (_con == ">=")
-        {
-          if (value >= t)
-          {
-            digitalWrite(out2, state);
-          }
-        }
-        else if (_con == "<=")
-        {
-          if (value <= t)
-          {
-            digitalWrite(out2, state);
-          }
-        }
-      }
-      else if (con == "humi" && status == true)
-      {
-        int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
-        String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
-        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
-        if (_con == ">=")
-        {
-          if (value >= t)
-          {
-            digitalWrite(out2, state);
-          }
-        }
-        else if (_con == "<=")
-        {
-          if (value <= t)
-          {
-            digitalWrite(out2, state);
-          }
-        }
-      }
-      else if (con == "soil" && status == true)
-      {
-        int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
-        String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
-        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
-        if (_con == ">=")
-        {
-          if (value >= t)
-          {
-            digitalWrite(out2, state);
-          }
-        }
-        else if (_con == "<=")
-        {
-          if (value <= t)
-          {
-            digitalWrite(out2, state);
-          }
-        }
-      }
-      else if (con == "ph" && status == true)
-      {
-        int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
-        String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
-        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
-        if (_con == ">=")
-        {
-          if (value >= t)
-          {
-            digitalWrite(out2, state);
-          }
-        }
-        else if (_con == "<=")
-        {
-          if (value <= t)
-          {
-            digitalWrite(out2, state);
-          }
-        }
-      }
-    }
-    else if (output == "out3")
-    {
-      bool status = actions["actions"][i]["mapValue"]["fields"]["status"]["booleanValue"];
-      String con = actions["actions"][i]["mapValue"]["fields"]["if"]["stringValue"];
-      if (con == "temp" && status == true)
-      {
-        int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
-        String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
-        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
-        if (_con == ">=")
-        {
-          if (value >= t)
-          {
-            digitalWrite(out3, state);
-          }
-        }
-        else if (_con == "<=")
-        {
-          if (value <= t)
-          {
-            digitalWrite(out3, state);
-          }
-        }
-      }
-      else if (con == "humi" && status == true)
-      {
-        int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
-        String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
-        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
-        if (_con == ">=")
-        {
-          if (value >= t)
-          {
-            digitalWrite(out3, state);
-          }
-        }
-        else if (_con == "<=")
-        {
-          if (value <= t)
-          {
-            digitalWrite(out3, state);
-          }
-        }
-      }
-      else if (con == "soil" && status == true)
-      {
-        int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
-        String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
-        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
-        if (_con == ">=")
-        {
-          if (value >= t)
-          {
-            digitalWrite(out3, state);
-          }
-        }
-        else if (_con == "<=")
-        {
-          if (value <= t)
-          {
-            digitalWrite(out3, state);
-          }
-        }
-      }
-      else if (con == "ph" && status == true)
-      {
-        int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
-        String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
-        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
-        if (_con == ">=")
-        {
-          if (value >= t)
-          {
-            digitalWrite(out3, state);
-          }
-        }
-        else if (_con == "<=")
-        {
-          if (value <= t)
-          {
-            digitalWrite(out3, state);
-          }
-        }
-      }
-    }
-    else if (output == "out4")
-    {
-      bool status = actions["actions"][i]["mapValue"]["fields"]["status"]["booleanValue"];
-      String con = actions["actions"][i]["mapValue"]["fields"]["if"]["stringValue"];
-      if (con == "temp" && status == true)
-      {
-        int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
-        String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
-        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
-        if (_con == ">=")
-        {
-          if (value >= t)
-          {
-            digitalWrite(out4, state);
-          }
-        }
-        else if (_con == "<=")
-        {
-          if (value <= t)
-          {
-            digitalWrite(out4, state);
-          }
-        }
-      }
-      else if (con == "humi" && status == true)
-      {
-        int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
-        String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
-        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
-        if (_con == ">=")
-        {
-          if (value >= t)
-          {
-            digitalWrite(out4, state);
-          }
-        }
-        else if (_con == "<=")
-        {
-          if (value <= t)
-          {
-            digitalWrite(out4, state);
-          }
-        }
-      }
-      else if (con == "soil" && status == true)
-      {
-        int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
-        String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
-        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
-        if (_con == ">=")
-        {
-          if (value >= t)
-          {
-            digitalWrite(out4, state);
-          }
-        }
-        else if (_con == "<=")
-        {
-          if (value <= t)
-          {
-            digitalWrite(out4, state);
-          }
-        }
-      }
-      else if (con == "ph" && status == true)
-      {
-        int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
-        String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
-        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
-        if (_con == ">=")
-        {
-          if (value >= t)
-          {
-            digitalWrite(out4, state);
-          }
-        }
-        else if (_con == "<=")
-        {
-          if (value <= t)
-          {
-            digitalWrite(out4, state);
-          }
-        }
-      }
-    }
-    else if (output == "out5")
-    {
-      bool status = actions["actions"][i]["mapValue"]["fields"]["status"]["booleanValue"];
-      String con = actions["actions"][i]["mapValue"]["fields"]["if"]["stringValue"];
-      if (con == "temp" && status == true)
-      {
-        int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
-        String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
-        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
-        if (_con == ">=")
-        {
-          if (value >= t)
-          {
-            digitalWrite(out5, state);
-          }
-        }
-        else if (_con == "<=")
-        {
-          if (value <= t)
-          {
-            digitalWrite(out5, state);
-          }
-        }
-      }
-      else if (con == "humi" && status == true)
-      {
-        int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
-        String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
-        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
-        if (_con == ">=")
-        {
-          if (value >= t)
-          {
-            digitalWrite(out5, state);
-          }
-        }
-        else if (_con == "<=")
-        {
-          if (value <= t)
-          {
-            digitalWrite(out5, state);
-          }
-        }
-      }
-      else if (con == "soil" && status == true)
-      {
-        int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
-        String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
-        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
-        if (_con == ">=")
-        {
-          if (value >= t)
-          {
-            digitalWrite(out5, state);
-          }
-        }
-        else if (_con == "<=")
-        {
-          if (value <= t)
-          {
-            digitalWrite(out5, state);
-          }
-        }
-      }
-      else if (con == "ph" && status == true)
-      {
-        int value = actions["actions"][i]["mapValue"]["fields"]["value"]["integerValue"];
-        String _con = actions["actions"][i]["mapValue"]["fields"]["con"]["stringValue"];
-        bool state = actions["actions"][i]["mapValue"]["fields"]["state"]["booleanValue"];
-        if (_con == ">=")
-        {
-          if (value >= t)
-          {
-            digitalWrite(out5, state);
-          }
-        }
-        else if (_con == "<=")
-        {
-          if (value <= t)
-          {
-            digitalWrite(out5, state);
-          }
-        }
-      }
-    }
-  }
-
-  // end action ========================================================================
+  mqtt_process(topic, payload);
 }
 
-void rainSensor()
+void setup()
 {
-  if (!digitalRead(pinSensorHujan) && hujan)
+  Serial.begin(115200);
+
+  if (!EEPROM.begin(EEPROM_SIZE))
+  { // Init EEPROM
+    Serial.println("failed to init EEPROM");
+    delay(1000);
+  }
+  else
   {
-    client.publish(String("/" + MACADD + "/data/weather"), "true", false);
-    hujan = false;
+    ssid = readStringFromFlash(0); // Read SSID stored at address 0
+    Serial.print("SSID = ");
+    Serial.println(ssid);
+    pss = readStringFromFlash(40); // Read Password stored at address 40
+    Serial.print("psss = ");
+    Serial.println(pss);
+    gmt = readStringFromFlash(80); // Read Password stored at address 80
+    Serial.print("gmt = ");
+    Serial.println(gmt);
   }
 
-  if (digitalRead(pinSensorHujan) && !hujan)
+  MACADD = String(WiFi.macAddress());
+
+  MACADD = getValue(MACADD, 58, 0) + getValue(MACADD, 58, 1) + getValue(MACADD, 58, 2) + getValue(MACADD, 58, 3) + getValue(MACADD, 58, 4) + getValue(MACADD, 58, 5);
+  MACADD.toLowerCase();
+
+  Serial.println(MACADD);
+
+  String str_reply = String("SON:5CH:" + String(lround(ESP.getEfuseMac() / 1234)) + ":MIKIKO");
+  char replyPacket[str_reply.length() + 1];
+
+  topic1 = String("/" + String(MACADD) + "/data/btn1");
+  topic2 = String("/" + String(MACADD) + "/data/btn2");
+  topic3 = String("/" + String(MACADD) + "/data/btn3");
+  topic4 = String("/" + String(MACADD) + "/data/btn4");
+  topic5 = String("/" + String(MACADD) + "/data/btn5");
+
+  fwVersion_topic = String("/" + MACADD + "/data/firmwareversion");
+  fwUpdate_topic = String("/" + String(MACADD) + "/data/ota");
+  fwRespone_topic = String("/" + String(MACADD) + "/data/otarespone");
+
+  schedule_topic = String("/" + String(MACADD) + "/data/schedule");
+
+  documentPath = String("devices/" + MACADD);
+  strcpy(replyPacket, str_reply.c_str());
+
+  lcd.begin();
+  lcd.backlight();
+  dht.begin();
+  btn.tick();
+
+  pinMode(BUILTIN_LED, OUTPUT);
+  pinMode(pinSensorHujan, INPUT);
+  pinMode(23, INPUT);
+  pinMode(out1, OUTPUT);
+  pinMode(out2, OUTPUT);
+  pinMode(out3, OUTPUT);
+  pinMode(out4, OUTPUT);
+  pinMode(out5, OUTPUT);
+
+  digitalWrite(out1, HIGH);
+
+  btn.attachLongPressStart(btnLongPress);
+  btn.setPressTicks(2000);
+
+  // writeStringToFlash("", 0);
+  // writeStringToFlash("", 40);
+  // writeStringToFlash("", 80);
+
+  if (ssid.length() > 0 && pss.length() > 0)
   {
-    client.publish(String("/" + MACADD + "/data/weather"), "false", false);
-    hujan = true;
+    WiFi.begin(ssid.c_str(), pss.c_str());
+
+    lcd.setCursor(0, 1);
+    lcd.print("Trying Connect Wifi");
+
+    Serial.print("Connecting to WiFi ..");
+    while (WiFi.status() != WL_CONNECTED)
+    {
+      btn.tick();
+      delay(1);
+    }
+    Serial.println(WiFi.localIP());
   }
+  else
+  {
+    WiFi.mode(WIFI_STA);
+
+    WiFi.beginSmartConfig();
+
+    udp.begin(2255);
+
+    lcd.setCursor(0, 1);
+    lcd.print("    Waiting WiFi   ");
+
+    while (!WiFi.smartConfigDone())
+    {
+      // delayMicroseconds(5);
+      delay(1);
+      btn.tick();
+      // Serial.print(".");
+    }
+
+    while (WiFi.status() != WL_CONNECTED)
+    {
+      // delayMicroseconds(5);
+      delay(1);
+      btn.tick();
+      // Serial.print(".");
+    }
+
+    while (true)
+    {
+      btn.tick();
+      if (udp.parsePacket())
+      {
+        udp.read(udpbuf, 3);
+        Serial.print("message = ");
+        Serial.print(udpbuf);
+        writeStringToFlash(udpbuf, 80);
+        gmt = udpbuf;
+        Serial.print(", from =");
+        Serial.print(udp.remoteIP());
+
+        udp.beginPacket(udp.remoteIP(), 2255);
+        int i = 0;
+        while (replyPacket[i] != 0)
+          udp.write((uint8_t)replyPacket[i++]);
+        Serial.print("udp send = ");
+        Serial.println(replyPacket);
+        udp.endPacket();
+        udp.flush();
+
+        break;
+      }
+    }
+
+    ssid = WiFi.SSID();
+    pss = WiFi.psk();
+
+    writeStringToFlash(ssid.c_str(), 0);
+    writeStringToFlash(pss.c_str(), 40);
+  }
+
+  lcd.clear();
+  lcd.setCursor(3, 1);
+  lcd.print("Connecting to ");
+  lcd.setCursor((20 - ssid.length()) / 2, 2);
+  lcd.print(ssid);
+
+  // WiFi.setAutoReconnect(true);
+  // WiFi.persistent(true);
+
+  // wifi_state = true;
+
+  // client.enableDebuggingMessages();
+  // client.enableHTTPWebUpdater(MACADD.c_str(), "");
+  // client.enableOTA();
+  // client.enableLastWillMessage(MACADD.c_str(), "false", true);
+
+  config.api_key = API_KEY;
+  config.database_url = DATABASE_URL;
+
+  configTime(0, gmt.toInt() * 3600, "pool.ntp.org");
+
+  while (!getLocalTime(&timeinfo))
+  {
+    Serial.println("Failed to obtain time");
+    // return;
+  }
+
+  client.setServer(mqtt_broker, mqtt_port);
+  client.setCallback(callback);
+
+  while (!client.connected())
+  {
+    String client_id = "esp8266-client-";
+    client_id += String(WiFi.macAddress());
+    Serial.printf("The client %s connects to the public mqtt broker\n", client_id.c_str());
+    if (client.connect(client_id.c_str(), mqtt_username, mqtt_password, MACADD.c_str(), 2, true, "false"))
+    {
+      client.subscribe(topic1.c_str());
+      client.subscribe(topic2.c_str());
+      client.subscribe(topic3.c_str());
+      client.subscribe(topic4.c_str());
+      client.subscribe(topic5.c_str());
+
+      client.subscribe("data/t");
+
+      client.subscribe(schedule_topic.c_str());
+
+      client.subscribe(fwUpdate_topic.c_str());
+      client.publish(fwVersion_topic.c_str(), FIRMWARE_VERSION, true);
+
+      client.publish(MACADD.c_str(), "true", true);
+    }
+    else
+    {
+      Serial.print("failed with state ");
+      Serial.print(client.state());
+      delay(2000);
+    }
+  }
+
+  auth.user.email = DEVICE_EMAIL;
+  auth.user.password = DEVICE_PASS;
+
+  config.token_status_callback = tokenStatusCallback;
+
+  fbdo.setResponseSize(4095);
+  Firebase.begin(&config, &auth);
+  Firebase.reconnectWiFi(true);
+
+  sendTime = String(hour + ":" + minutes);
+
+  // sensorRead();
+
+  // json.set("/temp", t);
+  // json.set("/hum", h);
+  // json.set("/soil", kelembabanTanah);
+  // json.set("/ph", phTanahValue);
+  // json.set("/time", sendTime);
+
+  // Firebase.RTDB.pushJSON(&fbdo, "/" + MACADD + "/Sensor", &json);
+
+  // Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/temp", t);
+  // Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/humi", h);
+  // Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/soil", kelembabanTanah);
+  // Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/ph", phTanahValue);
 }
+
+// void onConnectionEstablished()
+// {
+//   client.publish(String("/" + MACADD + "/data/weather"), "false", false);
+//   client.publish(String("/" + MACADD + "/data/firmwareversion"), FIRMWARE_VERSION, true);
+//   client.publish(MACADD.c_str(), "true", true);
+
+//   client.subscribe(String("/" + MACADD + "/data/btn1"), [](const String &payload)
+//                    {
+//                      Serial.println(payload);
+
+//                      if (payload == "true")
+//                      {
+//                        digitalWrite(out1, LOW);
+//                      }
+//                      else
+//                      {
+//                        digitalWrite(out1, HIGH);
+//                      } });
+//   client.subscribe(String("/" + MACADD + "/data/btn2"), [](const String &payload)
+//                    {
+//                      Serial.println(payload);
+
+//                      if (payload == "true")
+//                      {
+//                        digitalWrite(out2, LOW);
+//                      }
+//                      else
+//                      {
+//                        digitalWrite(out2, HIGH);
+//                      } });
+
+//   client.subscribe(String("/" + MACADD + "/data/btn3"), [](const String &payload)
+//                    {
+//                      Serial.println(payload);
+
+//                      if (payload == "true")
+//                      {
+//                        digitalWrite(out3, LOW);
+//                      }
+//                      else
+//                      {
+//                        digitalWrite(out3, HIGH);
+//                      } });
+
+//   client.subscribe(String("/" + MACADD + "/data/btn4"), [](const String &payload)
+//                    {
+//                      Serial.println(payload);
+
+//                      if (payload == "true")
+//                      {
+//                        digitalWrite(out4, LOW);
+//                      }
+//                      else
+//                      {
+//                        digitalWrite(out4, HIGH);
+//                      } });
+
+//   client.subscribe(String("/" + MACADD + "/data/btn5"), [](const String &payload)
+//                    {
+//                      Serial.println(payload);
+
+//                      if (payload == "true")
+//                      {
+//                        digitalWrite(out5, LOW);
+//                      }
+//                      else
+//                      {
+//                        digitalWrite(out5, HIGH);
+//                      } });
+
+//   client.subscribe(String("/" + MACADD + "/data/ota"), [](const String &payload)
+//                    {if(payload == "true"){
+//                      if (!Firebase.Storage.downloadOTA(&fbdo, STORAGE_BUCKET_ID, "MTH/firmware.bin", fcsDownloadCallback))
+//                         Serial.println(fbdo.errorReason());
+//                     } });
+
+//   client.subscribe(String("/" + MACADD + "/data/schedule"), [](const String &payload)
+//                    {
+//                      DynamicJsonDocument schedule(2045 * 2);
+//                      StaticJsonDocument<114> filter;
+
+//                      filter["fields"]["schedule"]["arrayValue"]["values"][0]["mapValue"] = true;
+
+//                      Serial.println("schedule");
+
+//                      if (Firebase.Firestore.getDocument(&fbdo, FIREBASE_PROJECT_ID, "", documentPath.c_str(), "schedule"))
+//                      {
+//                        Serial.printf("ok\n%s\n\n", fbdo.payload().c_str());
+
+//                        for (byte i = 0; i < 51; i++)
+//                        {
+//                          Cron.free(i);
+//                        }
+
+//                        DeserializationError error = deserializeJson(schedule, fbdo.payload().c_str(), DeserializationOption::Filter(filter));
+
+//                        if (error)
+//                        {
+//                          Serial.print(F("deserializeJson() failed: "));
+//                          Serial.println(error.f_str());
+//                          return;
+//                        }
+
+//                        for (int j = 0; j < schedule["fields"]["schedule"]["arrayValue"]["values"].size(); j++)
+//                        {
+//                          // String cron_id = schedule["fields"]["schedule"]["arrayValue"]["values"][j]["mapValue"]["fields"]["id"]["stringValue"];
+//                          String cron_data = schedule["fields"]["schedule"]["arrayValue"]["values"][j]["mapValue"]["fields"]["data"]["stringValue"];
+//                          String cron_string = getValue(cron_data, 58, 0);
+//                          String output = getValue(cron_data, 58, 1);
+//                          bool state = getValue(cron_data, 58, 2) == "1" ? true : false;
+//                          bool status = getValue(cron_data, 58, 3) == "1" ? true : false;
+
+//                          Serial.print("cron is =");
+//                          Serial.print(cron_string);
+//                          Serial.println("end");
+//                          Serial.print("output is = ");
+//                          Serial.println(output);
+//                          Serial.print("status is = ");
+//                          Serial.println(state);
+//                          Serial.print("status is = ");
+//                          Serial.println(status);
+
+//                          if (output == "out1" && status == true)
+//                          {
+//                            // if (repeat == true)
+//                            // {
+//                            //   if (state == true)
+//                            //   {
+//                            //     Cron.create(cron_string.c_str(), out1_on_once, true);
+//                            //   }
+//                            //   else
+//                            //   {
+//                            //     Cron.create(cron_string.c_str(), out1_off_once, true);
+//                            //   }
+//                            // }
+//                            // else
+//                            // {
+//                            if (state == true)
+//                            {
+//                              Cron.create(cron_string.c_str(), out1_on, false);
+//                            }
+//                            else
+//                            {
+//                              Cron.create(cron_string.c_str(), out1_off, false);
+//                            }
+//                            // }
+//                          }
+//                          else if (output == "out2" && status == true)
+//                          {
+//                            // if (repeat == true)
+//                            // {
+//                            //   if (state == true)
+//                            //   {
+//                            //     Cron.create(cron_string.c_str(), out2_on_once, true);
+//                            //   }
+//                            //   else
+//                            //   {
+//                            //     Cron.create(cron_string.c_str(), out2_off_once, true);
+//                            //   }
+//                            // }
+//                            // else
+//                            // {
+//                            if (state == true)
+//                            {
+//                              Cron.create(cron_string.c_str(), out2_on, false);
+//                            }
+//                            else
+//                            {
+//                              Cron.create(cron_string.c_str(), out2_off, false);
+//                            }
+//                            // }
+//                          }
+//                          else if (output == "out3" && status == true)
+//                          {
+//                            // if (repeat == true)
+//                            // {
+//                            //   if (state == true)
+//                            //   {
+//                            //     Cron.create(cron_string.c_str(), out3_on_once, true);
+//                            //   }
+//                            //   else
+//                            //   {
+//                            //     Cron.create(cron_string.c_str(), out3_off_once, true);
+//                            //   }
+//                            // }
+//                            // else
+//                            // {
+//                            if (state == true)
+//                            {
+//                              Cron.create(cron_string.c_str(), out3_on, false);
+//                            }
+//                            else
+//                            {
+//                              Cron.create(cron_string.c_str(), out3_off, false);
+//                            }
+//                            // }
+//                          }
+//                          else if (output == "out4" && status == true)
+//                          {
+//                            // if (repeat == true)
+//                            // {
+//                            //   if (state == true)
+//                            //   {
+//                            //     Cron.create(cron_string.c_str(), out4_on_once, true);
+//                            //   }
+//                            //   else
+//                            //   {
+//                            //     Cron.create(cron_string.c_str(), out4_off_once, true);
+//                            //   }
+//                            // }
+//                            // else
+//                            // {
+//                            if (state == true)
+//                            {
+//                              Cron.create(cron_string.c_str(), out4_on, false);
+//                            }
+//                            else
+//                            {
+//                              Cron.create(cron_string.c_str(), out4_off, false);
+//                            }
+//                          }
+//                          else if (output == "out5" && status == true)
+//                          {
+//                            // if (repeat == true)
+//                            // {
+//                            //   if (state == true)
+//                            //   {
+//                            //     Cron.create(cron_string.c_str(), out4_on_once, true);
+//                            //   }
+//                            //   else
+//                            //   {
+//                            //     Cron.create(cron_string.c_str(), out4_off_once, true);
+//                            //   }
+//                            // }
+//                            // else
+//                            // {
+//                            if (state == true)
+//                            {
+//                              Cron.create(cron_string.c_str(), out5_on, false);
+//                            }
+//                            else
+//                            {
+//                              Cron.create(cron_string.c_str(), out5_off, false);
+//                            }
+//                            // }
+//                          }
+//                        }
+//                      }
+//                      else
+//                      {
+//                        Serial.println(fbdo.errorReason());
+//                      }
+
+//                      schedule.clear(); });
+// }
+
+// void rainSensor()
+// {
+//   if (!digitalRead(pinSensorHujan) && hujan)
+//   {
+//     client.publish(String("/" + MACADD + "/data/weather"), "true", false);
+//     hujan = false;
+//   }
+
+//   if (digitalRead(pinSensorHujan) && !hujan)
+//   {
+//     client.publish(String("/" + MACADD + "/data/weather"), "false", false);
+//     hujan = true;
+//   }
+// }
 
 void sensorDisplay()
 {
@@ -1306,29 +1136,26 @@ void sensorDisplay()
 
 void loop()
 {
+  getLocalTime(&timeinfo);
+
   client.loop();
 
   millisTime = millis();
 
+  Cron.delay();
+
   btn.tick();
 
-  hour = String(timeClient.getHours());
-  minutes = String(timeClient.getMinutes());
-
-  if (hour.length() == 1)
-  {
-    hour = String("0" + hour);
-  }
-
-  if (minutes.length() == 1)
-  {
-    minutes = String("0" + minutes);
-  }
-
-  sendTime = String(hour + ":" + minutes);
+  // if (!getLocalTime(&timeinfo))
+  // {
+  //   // Serial.println("Failed to obtain time");
+  //   // return;
+  // }
+  // Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
+  // Serial.println(asctime(&timeinfo));
 
   // sendTime = String(String(timeClient.getHours()) + ":" + String(timeClient.getMinutes()));
-  days = timeClient.getDay();
+  // days = timeClient.getDay();
 
   // Serial.println(sendTime);
   // Serial.print("convert time = ");
@@ -1337,22 +1164,22 @@ void loop()
   // delay(1000); // ================= remove
 
   sensorRead();
-  // rainSensor();
+  // // rainSensor();
   sensorDisplay();
 
-  scheduleAndAction();
+  // // scheduleAndAction();
 
-  if (millisTime - rtdbTime > 5000)
+  if (timeinfo.tm_sec % 5 == 0 || timeinfo.tm_sec == 0)
   {
     Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/temp", t);
     Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/humi", h);
     Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/soil", kelembabanTanah);
     Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/ph", phTanahValue);
 
-    rtdbTime = millisTime;
+    // rtdbTime = millisTime;
   }
 
-  if (millisTime - sensorTime > 300000)
+  if (timeinfo.tm_min % 30 == 0 || timeinfo.tm_min == 0)
   {
 
     json.set("/temp", t);
@@ -1363,7 +1190,7 @@ void loop()
 
     Firebase.RTDB.pushJSON(&fbdo, "/" + MACADD + "/Sensor", &json);
 
-    sensorTime = millisTime;
+    // sensorTime = millisTime;
   }
 
   delayMicroseconds(5);
