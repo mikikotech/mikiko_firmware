@@ -1,34 +1,22 @@
-// #include <Arduino.h>
-
-// void setup()
-// {
-//   pinMode(4, OUTPUT);
-// }
-
-// void loop()
-// {
-//   digitalWrite(4, HIGH);
-//   delay(100);
-//   digitalWrite(4, LOW);
-//   delay(100);
-// }
-
-// #define ARDUINOJSON_ENABLE_PROGMEM 1
 #include <Arduino.h>
 #include <WiFi.h>
-#include <WiFiUdp.h>
-#include <Adafruit_Sensor.h>
-#include <LiquidCrystal_I2C.h>
-#include "OneButton.h"
-#include "DHT.h"
 #include <ArduinoJson.h>
 #include <Firebase_ESP_Client.h>
 #include "addons/TokenHelper.h"
 #include "addons/RTDBHelper.h"
+#include "time.h"
+#include <Adafruit_Sensor.h>
+#include <AsyncUDP.h>
 #include <PubSubClient.h>
-#include <time.h>
-#include "CronAlarms.h"
+// #include <EspMQTTClient.h>
+#include <WiFiUdp.h>
+#include "Update.h"
 #include "EEPROM.h"
+#include <Ticker.h>
+#include <LiquidCrystal_I2C.h>
+#include "OneButton.h"
+#include "DHT.h"
+#include <CronAlarms.h>
 
 #define FIREBASE_PROJECT_ID "mikiko-c5ca4"
 #define STORAGE_BUCKET_ID "gs://mikiko-c5ca4.appspot.com"
@@ -36,50 +24,29 @@
 #define DATABASE_URL "https://mikiko-c5ca4-default-rtdb.firebaseio.com/"
 
 // device info
-#define DEVICE_EMAIL "mikikoSON@mikiko.com"
-#define DEVICE_PASS "mikikoSON"
-#define FIRMWARE_VERSION "0.0.1"
+#define DEVICE_EMAIL "mikikoMTH@mikiko.com"
+#define DEVICE_PASS "mikikoMTH"
+#define FIRMWARE_VERSION "1.0.1"
 
-#define LENGTH(x) (strlen(x) + 1)
-#define EEPROM_SIZE 200
+#define LENGTH(x) (strlen(x) + 1) // length of char string
+#define EEPROM_SIZE 200           // EEPROM size
 
 #define DHTPIN 25
 #define DHTTYPE DHT21
 
-#define pinSensorHujan 26
-#define phTanahPin 36
-#define kelembabanTanahPin 39
-
 #define out1 13 // relay
-#define out2 18 // solenoid1
-#define out3 4  // pin GPIO2 atau GPIO4  // solenoid2
-#define out4 16 // pin GPIO0 atau GPIO16 // solenoid3
+#define out2 18 // 18 // solenoid1
+#define out3 2  // pin GPIO2 atau GPIO4  // solenoid2
+#define out4 0  // pin GPIO0 atau GPIO16 // solenoid3
 #define out5 5  // solenoid4
-
-DHT dht(DHTPIN, DHTTYPE);
-
-FirebaseData fbdo;
-FirebaseAuth auth;
-FirebaseConfig config;
-FirebaseJson json;
-
-WiFiUDP udp;
+#define pinSensorHujan 26
+#define phTanahPin A0
+#define kelembabanTanahPin A1
 
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-struct tm *timeinfo;
-
-LiquidCrystal_I2C lcd(0x27, 20, 4);
-
-OneButton btn = OneButton(
-    23,    // Input pin for the button
-    false, // Button is active high
-    false  // Disable internal pull-up resistor
-);
-
-// CronId schedule_id[52];
-// int cron_count = 0;
+struct tm timeinfo;
 
 String uniq_username = String("MIKIKO" + WiFi.macAddress());
 
@@ -88,9 +55,25 @@ const char *mqtt_username = uniq_username.c_str();
 const char *mqtt_password = "mikiko";
 const int mqtt_port = 1883;
 
-// const char *ntpServer = "pool.ntp.org";
-// const long gmtOffset_sec = 0;
-// const int daylightOffset_sec = 3600;
+FirebaseData fbdo;
+FirebaseAuth auth;
+FirebaseConfig config;
+FirebaseJson json;
+
+DHT dht(DHTPIN, DHTTYPE);
+OneButton btn = OneButton(
+    23,    // Input pin for the button
+    false, // Button is active high
+    false  // Disable internal pull-up resistor
+);
+
+Ticker ticker;
+LiquidCrystal_I2C lcd(0x27, 20, 4);
+
+WiFiUDP udp;
+
+char udpbuf[3];
+// char replyPacket[] = "MTH:5CH:MIKIKO";
 
 String ssid; // string variable to store ssid
 String pss;  // string variable to store password
@@ -102,31 +85,32 @@ String topic2;
 String topic3;
 String topic4;
 String topic5;
+String rain_topic;
 String fwVersion_topic;
 String fwUpdate_topic;
 String fwRespone_topic;
 String schedule_topic;
-String documentPath;
 
-unsigned long int millisTime = 0;
-unsigned long int displayTime = 0;
+uint64_t millisTime = 0;
+uint64_t displayTime = 0;
+unsigned long int sensorTime = 0;
+unsigned long int rtdbTime = 0;
+
+bool udpmsg = true;
 bool display1 = true;
 bool display2 = false;
-
 bool hujan = true;
 
 float t, h, phTanahValue;
 int kelembabanTanah;
 
-bool wifi_state = false;
-
-char udpbuf[3];
-
-static void wifi_led();
+String documentPath;
+String mask = "actions";
+String sendTime, day;
 
 void out1_on()
 {
-    digitalWrite(out1, HIGH);
+    digitalWrite(out1, LOW);
     Serial.println("out 1 on");
 
     client.publish(topic1.c_str(), "true", true);
@@ -134,7 +118,7 @@ void out1_on()
 
 void out1_off()
 {
-    digitalWrite(out1, LOW);
+    digitalWrite(out1, HIGH);
     Serial.println("out 1 off");
     client.publish(topic1.c_str(), "false", true);
 }
@@ -195,54 +179,6 @@ void out5_off()
     client.publish(topic5.c_str(), "false", true);
 }
 
-void sensorRead()
-{
-    h = dht.readHumidity();
-    t = dht.readTemperature();
-    if (isnan(h) || isnan(t))
-    {
-        h = 0;
-        t = 0;
-    }
-
-    kelembabanTanah = map(analogRead(kelembabanTanahPin), 4095, 0, 0, 100);
-
-    if (kelembabanTanah > 100)
-    {
-        kelembabanTanah = 100;
-    }
-    else if (kelembabanTanah < 0)
-    {
-        kelembabanTanah = 0;
-    }
-
-    int phADCval = analogRead(phTanahPin);
-    phADCval = map(phADCval, 0, 4095, 4, 45);
-
-    phTanahValue = (-0.0693 * phADCval) + 7.3855;
-}
-
-void schedule_check();
-
-String getValue(String data, char separator, int index)
-{
-    int found = 0;
-    int strIndex[] = {0, -1};
-    int maxIndex = data.length() - 1;
-
-    for (int i = 0; i <= maxIndex && found <= index; i++)
-    {
-        if (data.charAt(i) == separator || i == maxIndex)
-        {
-            found++;
-            strIndex[0] = strIndex[1] + 1;
-            strIndex[1] = (i == maxIndex) ? i + 1 : i;
-        }
-    }
-
-    return found > index ? data.substring(strIndex[0], strIndex[1]) : "";
-}
-
 void writeStringToFlash(const char *toStore, int startAddr)
 {
     int i = 0;
@@ -265,24 +201,96 @@ String readStringFromFlash(int startAddr)
     return String(in);
 }
 
+String getValue(String data, char separator, int index)
+{
+    int found = 0;
+    int strIndex[] = {0, -1};
+    int maxIndex = data.length() - 1;
+
+    for (int i = 0; i <= maxIndex && found <= index; i++)
+    {
+        if (data.charAt(i) == separator || i == maxIndex)
+        {
+            found++;
+            strIndex[0] = strIndex[1] + 1;
+            strIndex[1] = (i == maxIndex) ? i + 1 : i;
+        }
+    }
+
+    return found > index ? data.substring(strIndex[0], strIndex[1]) : "";
+}
+
+void btnLongPress()
+{
+    writeStringToFlash("", 0);  // Reset the SSID
+    writeStringToFlash("", 40); // Reset the Password
+    writeStringToFlash("", 80); // Reset gmt
+    Serial.println("Wifi credentials erased");
+    Serial.println("Restarting the ESP");
+    delay(500);
+    ESP.restart();
+}
+
+void sensorRead()
+{
+    h = dht.readHumidity();
+    t = dht.readTemperature();
+    if (isnan(h) || isnan(t))
+    {
+        h = 0;
+        t = 0;
+    }
+
+    // Serial.println(analogRead(kelembabanTanahPin));
+
+    kelembabanTanah = map(analogRead(kelembabanTanahPin), 4095, 0, 0, 100);
+
+    if (kelembabanTanah > 100)
+    {
+        kelembabanTanah = 100;
+    }
+    else if (kelembabanTanah < 0)
+    {
+        kelembabanTanah = 0;
+    }
+
+    int phADCval = analogRead(phTanahPin);
+    phADCval = map(phADCval, 0, 4095, 4, 45);
+
+    phTanahValue = (-0.0693 * phADCval) + 7.3855;
+}
+
 void fcsDownloadCallback(FCS_DownloadStatusInfo info)
 {
     if (info.status == fb_esp_fcs_download_status_init)
     {
         Serial.printf("Downloading firmware %s (%d)\n", info.remoteFileName.c_str(), info.fileSize);
-        client.publish(fwRespone_topic.c_str(), "start");
+        lcd.clear();
+        lcd.setCursor(0, 1);
+        lcd.print("Downloading firmware");
+        delay(1000);
     }
     else if (info.status == fb_esp_fcs_download_status_download)
     {
         Serial.printf("Downloaded %d%s\n", (int)info.progress, "%");
+        lcd.clear();
+        lcd.setCursor(3, 1);
+        lcd.printf("Downloaded %d%s\n", (int)info.progress, "%");
     }
     else if (info.status == fb_esp_fcs_download_status_complete)
     {
-        if (client.publish(fwRespone_topic.c_str(), "done"))
-        {
-            delay(1000);
-            ESP.restart();
-        }
+        lcd.clear();
+        lcd.setCursor(0, 1);
+        lcd.print("installing firmware!");
+        Serial.println("Update firmware completed.");
+        Serial.println();
+        Serial.println("Restarting...\n\n");
+        delay(3000);
+        lcd.clear();
+        lcd.setCursor(8, 1);
+        lcd.print("Done");
+        delay(1000);
+        ESP.restart();
     }
     else if (info.status == fb_esp_fcs_download_status_error)
     {
@@ -306,11 +314,11 @@ void mqtt_process(char *topic, byte *payload)
 
         if (msg == "true")
         {
-            digitalWrite(out1, HIGH);
+            digitalWrite(out1, LOW);
         }
         else
         {
-            digitalWrite(out1, LOW);
+            digitalWrite(out1, HIGH);
         }
     }
     else if (strTopic == topic2)
@@ -374,13 +382,6 @@ void mqtt_process(char *topic, byte *payload)
         {
             digitalWrite(out5, LOW);
         }
-    }
-    else if (strTopic == "data/t")
-    {
-
-        msg = String((char *)payload);
-
-        WiFi.mode(WIFI_OFF);
     }
     else if (strTopic == fwUpdate_topic)
     {
@@ -588,122 +589,92 @@ void callback(char *topic, byte *payload, unsigned int length)
     mqtt_process(topic, payload);
 }
 
-void sensorDisplay()
+void Wifi_disconnected(WiFiEvent_t event, WiFiEventInfo_t info)
 {
-    if (millisTime - displayTime > 4000 && display1)
-    {
-        display2 = true;
-
-        lcd.setCursor(0, 2);
-        lcd.print("Temp = ");
-        lcd.print(t);
-        lcd.print((char)223);
-        lcd.print("C    ");
-        lcd.setCursor(0, 3);
-        lcd.print("Humidity = ");
-        lcd.print(h);
-        lcd.print(" % ");
-
-        displayTime = millisTime;
-        display1 = false;
-    }
-
-    if (millisTime - displayTime > 4000 && display2)
-    {
-        display1 = true;
-
-        lcd.setCursor(0, 2);
-        lcd.print("Ph tanah = ");
-        lcd.print(String(String(phTanahValue) + "   "));
-        lcd.setCursor(0, 3);
-        lcd.print("Soil RH = ");
-        lcd.print(kelembabanTanah);
-        lcd.print(" %      ");
-
-        displayTime = millisTime;
-        display2 = false;
-    }
+    Serial.println("Disconnected from WIFI access point");
+    Serial.print("WiFi lost connection. Reason: ");
+    Serial.println(info.wifi_sta_disconnected.reason);
+    Serial.println("Reconnecting...");
+    WiFi.begin(ssid.c_str(), pss.c_str());
 }
 
-void btnLongPress()
-{
-    writeStringToFlash("", 0);
-    writeStringToFlash("", 40);
-    writeStringToFlash("", 80);
-    ESP.restart();
-}
+// ==================================================================
 
 void setup()
 {
     Serial.begin(115200);
-    // put your setup code here, to run once:
 
-    EEPROM.begin(EEPROM_SIZE);
+    if (!EEPROM.begin(EEPROM_SIZE))
+    { // Init EEPROM
+        Serial.println("failed to init EEPROM");
+        delay(1000);
+    }
+    else
+    {
+        ssid = readStringFromFlash(0); // Read SSID stored at address 0
+        Serial.print("SSID = ");
+        Serial.println(ssid);
+        pss = readStringFromFlash(40); // Read Password stored at address 40
+        Serial.print("psss = ");
+        Serial.println(pss);
+        gmt = readStringFromFlash(80); // Read Password stored at address 80
+        Serial.print("gmt = ");
+        Serial.println(gmt);
+    }
 
-    pinMode(out1, OUTPUT);
-    pinMode(out2, OUTPUT);
-    pinMode(out3, OUTPUT);
-    pinMode(out4, OUTPUT);
-    pinMode(out5, OUTPUT);
-
-    // btn.attachClick(handleClick1);
-    btn.attachLongPressStart(btnLongPress);
-    btn.setPressTicks(3000);
-
-    lcd.begin();
-    lcd.backlight();
-    dht.begin();
-    btn.tick();
-
-    Serial.println(lround(ESP.getEfuseMac() / 1234));
-
-    String str_reply = String("SON:5CH:" + String(lround(ESP.getEfuseMac() / 1234)) + ":MIKIKO");
-    char replyPacket[str_reply.length() + 1];
-
-    strcpy(replyPacket, str_reply.c_str());
+    MACADD = String(WiFi.macAddress());
 
     MACADD = getValue(MACADD, 58, 0) + getValue(MACADD, 58, 1) + getValue(MACADD, 58, 2) + getValue(MACADD, 58, 3) + getValue(MACADD, 58, 4) + getValue(MACADD, 58, 5);
     MACADD.toLowerCase();
 
-    topic1 = String("/" + String(MACADD) + "/data/btn");
+    Serial.println(MACADD);
+
+    String str_reply = String("SON:5CH:" + String(lround(ESP.getEfuseMac() / 1234)) + ":MIKIKO");
+    char replyPacket[str_reply.length() + 1];
+
+    topic1 = String("/" + String(MACADD) + "/data/btn1");
     topic2 = String("/" + String(MACADD) + "/data/btn2");
     topic3 = String("/" + String(MACADD) + "/data/btn3");
     topic4 = String("/" + String(MACADD) + "/data/btn4");
     topic5 = String("/" + String(MACADD) + "/data/btn5");
+    rain_topic = String("/" + MACADD + "/data/weather");
 
     fwVersion_topic = String("/" + MACADD + "/data/firmwareversion");
     fwUpdate_topic = String("/" + String(MACADD) + "/data/ota");
     fwRespone_topic = String("/" + String(MACADD) + "/data/otarespone");
 
     schedule_topic = String("/" + String(MACADD) + "/data/schedule");
+
     documentPath = String("devices/" + MACADD);
+    strcpy(replyPacket, str_reply.c_str());
 
-    // ["fields"]["schedule"]["arrayValue"]["values"];
+    lcd.begin();
+    lcd.backlight();
+    dht.begin();
+    btn.tick();
 
-    ssid = readStringFromFlash(0); // Read SSID stored at address 0
-    Serial.print("SSID = ");
-    Serial.println(ssid);
-    pss = readStringFromFlash(40); // Read Password stored at address 40
-    Serial.print("psss = ");
-    Serial.println(pss);
-    gmt = readStringFromFlash(80);
-    Serial.print("gmt = ");
-    Serial.println(gmt);
+    pinMode(pinSensorHujan, INPUT);
+    pinMode(DHTPIN, INPUT);
+    pinMode(kelembabanTanahPin, INPUT);
+    pinMode(23, INPUT);
+    pinMode(out1, OUTPUT);
+    pinMode(out2, OUTPUT);
+    pinMode(out3, OUTPUT);
+    pinMode(out4, OUTPUT);
+    pinMode(out5, OUTPUT);
 
-    Serial.println(MACADD);
+    digitalWrite(out1, HIGH);
+    digitalWrite(out2, LOW);
+    digitalWrite(out3, LOW);
+    digitalWrite(out4, LOW);
+    digitalWrite(out5, LOW);
 
-    // WiFi.begin("Wifi saya", "1sampai9");
+    btn.attachLongPressStart(btnLongPress);
+    btn.setPressTicks(2000);
 
-    // while (WiFi.status() != WL_CONNECTED)
-    // {
-    //   delay(500);
-    //   Serial.print(".");
-    // }
-    // Serial.println("CONNECTED to WIFI");
-
-    writeStringToFlash("", 0);
-    writeStringToFlash("", 40);
-    writeStringToFlash("", 80);
+    // writeStringToFlash("", 0);
+    // writeStringToFlash("", 40);
+    // writeStringToFlash("", 80);
 
     if (ssid.length() > 0 && pss.length() > 0)
     {
@@ -786,18 +757,27 @@ void setup()
     lcd.setCursor((20 - ssid.length()) / 2, 2);
     lcd.print(ssid);
 
-    WiFi.setAutoReconnect(true);
-    WiFi.persistent(true);
+    // WiFi.setAutoReconnect(true);
+    // WiFi.persistent(true);
 
-    wifi_state = true;
+    // wifi_state = true;
+
+    // client.enableDebuggingMessages();
+    // client.enableHTTPWebUpdater(MACADD.c_str(), "");
+    // client.enableOTA();
+    // client.enableLastWillMessage(MACADD.c_str(), "false", true);
+
+    // WiFi.onEvent(Wifi_disconnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+
+    config.api_key = API_KEY;
+    config.database_url = DATABASE_URL;
 
     configTime(0, gmt.toInt() * 3600, "pool.ntp.org");
 
-    // struct tm timeinfo;
-
-    while (!getLocalTime(timeinfo))
+    while (!getLocalTime(&timeinfo))
     {
-        Serial.println("failed to obtain time");
+        Serial.println("Failed to obtain time");
+        // return;
     }
 
     client.setServer(mqtt_broker, mqtt_port);
@@ -816,8 +796,6 @@ void setup()
             client.subscribe(topic4.c_str());
             client.subscribe(topic5.c_str());
 
-            client.subscribe("data/t");
-
             client.subscribe(schedule_topic.c_str());
 
             client.subscribe(fwUpdate_topic.c_str());
@@ -833,28 +811,83 @@ void setup()
         }
     }
 
-    config.api_key = API_KEY;
-    config.database_url = DATABASE_URL;
-
     auth.user.email = DEVICE_EMAIL;
     auth.user.password = DEVICE_PASS;
 
     config.token_status_callback = tokenStatusCallback;
 
-    fbdo.setResponseSize(4095 * 2);
-    config.fcs.download_buffer_size = 2048;
+    fbdo.setResponseSize(4095);
     Firebase.begin(&config, &auth);
     Firebase.reconnectWiFi(true);
+
+    delay(2000);
+
+    lcd.clear();
+    lcd.setCursor(4, 1);
+    lcd.print("Connected !!");
+    delay(2000);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print(" MIKIKO TECHNOLOGY ");
+    lcd.setCursor(0, 1);
+    lcd.print("--------------------");
 }
 
-unsigned long dataMillis = 0;
-int count = 0;
+void sensorDisplay()
+{
+    if (millisTime - displayTime > 4000 && display1)
+    {
+        display2 = true;
+
+        lcd.setCursor(0, 2);
+        lcd.print("Temp = ");
+        lcd.print(t);
+        lcd.print((char)223);
+        lcd.print("C    ");
+        lcd.setCursor(0, 3);
+        lcd.print("Humidity = ");
+        lcd.print(h);
+        lcd.print(" % ");
+
+        displayTime = millisTime;
+        display1 = false;
+    }
+
+    if (millisTime - displayTime > 4000 && display2)
+    {
+        display1 = true;
+
+        lcd.setCursor(0, 2);
+        lcd.print("Ph tanah = ");
+        lcd.print(String(String(phTanahValue) + "   "));
+        lcd.setCursor(0, 3);
+        lcd.print("Soil RH = ");
+        lcd.print(kelembabanTanah);
+        lcd.print(" %      ");
+
+        displayTime = millisTime;
+        display2 = false;
+    }
+}
+
+void rainSensor()
+{
+    if (!digitalRead(pinSensorHujan) && hujan)
+    {
+        client.publish(rain_topic.c_str(), "true", false);
+        hujan = false;
+    }
+
+    if (digitalRead(pinSensorHujan) && !hujan)
+    {
+        client.publish(rain_topic.c_str(), "false", false);
+        hujan = true;
+    }
+}
 
 void loop()
 {
-    // put your main code here, to run repeatedly:
-
-    // Serial.println(asctime(timeinfo));
+    getLocalTime(&timeinfo);
 
     client.loop();
 
@@ -864,13 +897,85 @@ void loop()
 
     btn.tick();
 
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        Serial.println("reconnecting.....");
+        WiFi.disconnect();
+        while (!WiFi.reconnect())
+        {
+            Serial.println("try to connect!!!");
+
+            getLocalTime(&timeinfo);
+
+            millisTime = millis();
+
+            Cron.delay();
+
+            btn.tick();
+        }
+
+        while (!client.connected())
+        {
+            getLocalTime(&timeinfo);
+            Cron.delay();
+            String client_id = "esp8266-client-";
+            client_id += String(WiFi.macAddress());
+            Serial.printf("The client %s connects to the public mqtt broker\n", client_id.c_str());
+            if (client.connect(client_id.c_str(), mqtt_username, mqtt_password, MACADD.c_str(), 2, true, "false"))
+            {
+                client.subscribe(topic1.c_str());
+                client.subscribe(topic2.c_str());
+                client.subscribe(topic3.c_str());
+                client.subscribe(topic4.c_str());
+                client.subscribe(topic5.c_str());
+
+                client.subscribe(schedule_topic.c_str());
+
+                client.subscribe(fwUpdate_topic.c_str());
+                client.publish(fwVersion_topic.c_str(), FIRMWARE_VERSION, true);
+
+                client.publish(MACADD.c_str(), "true", true);
+            }
+            else
+            {
+                Serial.print("failed with state ");
+                Serial.print(client.state());
+            }
+        }
+    }
+
     sensorRead();
-
+    // rainSensor();
     sensorDisplay();
-    // Serial.println(Cron.count());
 
-    // Serial.println(ESP.getMaxFreeBlockSize());
+    sendTime = String(String(timeinfo.tm_hour) + ":" + String(timeinfo.tm_min));
+    day = String(String(timeinfo.tm_mday) + "/" + String(timeinfo.tm_mon + 1) + "/" + String(timeinfo.tm_year + 1900));
+    // // scheduleAndAction();
 
-    // delay(1000);
+    if (timeinfo.tm_sec % 5 == 0 || timeinfo.tm_sec == 0)
+    {
+        Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/temp", t);
+        Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/humi", h);
+        Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/soil", kelembabanTanah);
+        Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/ph", phTanahValue);
+
+        // rtdbTime = millisTime;
+    }
+
+    if (timeinfo.tm_min % 30 == 0 || timeinfo.tm_min == 0)
+    {
+
+        json.set("/temp", t);
+        json.set("/hum", h);
+        json.set("/soil", kelembabanTanah);
+        json.set("/ph", phTanahValue);
+        json.set("/time", sendTime);
+        json.set("/day", day);
+
+        Firebase.RTDB.pushJSON(&fbdo, "/" + MACADD + "/Sensor", &json);
+
+        // sensorTime = millisTime;
+    }
+
     delayMicroseconds(5);
 }

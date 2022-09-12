@@ -8,7 +8,7 @@
 #include <Adafruit_Sensor.h>
 #include <AsyncUDP.h>
 #include <PubSubClient.h>
-// #include <EspMQTTClient.h>
+#include <HTTPClient.h>
 #include <WiFiUdp.h>
 #include "Update.h"
 #include "EEPROM.h"
@@ -17,6 +17,7 @@
 #include "OneButton.h"
 #include "DHT.h"
 #include <CronAlarms.h>
+#include <math.h>
 
 #define FIREBASE_PROJECT_ID "mikiko-c5ca4"
 #define STORAGE_BUCKET_ID "gs://mikiko-c5ca4.appspot.com"
@@ -35,30 +36,35 @@
 #define DHTTYPE DHT21
 
 #define out1 13 // relay
-#define out2 18 // solenoid1
-#define out3 4  // pin GPIO2 atau GPIO4  // solenoid2
-#define out4 16 // pin GPIO0 atau GPIO16 // solenoid3
+#define out2 18 // 18 // solenoid1
+#define out3 2  // pin GPIO2 atau GPIO4  // solenoid2
+#define out4 0  // pin GPIO0 atau GPIO16 // solenoid3
 #define out5 5  // solenoid4
 #define pinSensorHujan 26
 #define phTanahPin A0
 #define kelembabanTanahPin A1
 
 WiFiClient espClient;
+WiFiClient mikiko_client;
+WiFiClient http_notif;
+HTTPClient http;
 PubSubClient client(espClient);
 
 struct tm timeinfo;
 
 String uniq_username = String("MIKIKO" + WiFi.macAddress());
+String client_id;
 
 const char *mqtt_broker = "broker.hivemq.com";
 const char *mqtt_username = uniq_username.c_str();
 const char *mqtt_password = "mikiko";
 const int mqtt_port = 1883;
 
-FirebaseData fbdo;
-FirebaseAuth auth;
-FirebaseConfig config;
-FirebaseJson json;
+String api_endpoint;
+CronId id;
+DynamicJsonDocument schedule(1024);
+DynamicJsonDocument http_data(128);
+String string_http_data;
 
 DHT dht(DHTPIN, DHTTYPE);
 OneButton btn = OneButton(
@@ -85,6 +91,7 @@ String topic2;
 String topic3;
 String topic4;
 String topic5;
+String rain_topic;
 String fwVersion_topic;
 String fwUpdate_topic;
 String fwRespone_topic;
@@ -92,11 +99,8 @@ String schedule_topic;
 
 uint64_t millisTime = 0;
 uint64_t displayTime = 0;
-unsigned long int sensorTime = 0;
-unsigned long int rtdbTime = 0;
+long lastReconnectAttempt;
 
-bool udpmsg = true;
-bool wificheck = true;
 bool display1 = true;
 bool display2 = false;
 bool hujan = true;
@@ -104,80 +108,8 @@ bool hujan = true;
 float t, h, phTanahValue;
 int kelembabanTanah;
 
-String documentPath;
 String mask = "actions";
-String hour, minutes, sendTime;
-
-void out1_on()
-{
-  digitalWrite(out1, LOW);
-  Serial.println("out 1 on");
-
-  client.publish(topic1.c_str(), "true", true);
-}
-
-void out1_off()
-{
-  digitalWrite(out1, HIGH);
-  Serial.println("out 1 off");
-  client.publish(topic1.c_str(), "false", true);
-}
-
-void out2_on()
-{
-  digitalWrite(out2, HIGH);
-  Serial.println("out 2 on");
-  client.publish(topic2.c_str(), "true", true);
-}
-
-void out2_off()
-{
-  digitalWrite(out2, LOW);
-  Serial.println("out 2 off");
-  client.publish(topic2.c_str(), "false", true);
-}
-
-void out3_on()
-{
-  digitalWrite(out3, HIGH);
-  Serial.println("out 3 on");
-  client.publish(topic3.c_str(), "true", true);
-}
-
-void out3_off()
-{
-  digitalWrite(out3, LOW);
-  Serial.println("out 3 off");
-  client.publish(topic3.c_str(), "false", true);
-}
-
-void out4_on()
-{
-  digitalWrite(out4, HIGH);
-  Serial.println("out 4 on");
-  client.publish(topic4.c_str(), "true", true);
-}
-
-void out4_off()
-{
-  digitalWrite(out4, LOW);
-  Serial.println("out 4 off");
-  client.publish(topic4.c_str(), "false", true);
-}
-
-void out5_on()
-{
-  digitalWrite(out5, HIGH);
-  Serial.println("out 5 on");
-  client.publish(topic5.c_str(), "true", true);
-}
-
-void out5_off()
-{
-  digitalWrite(out5, LOW);
-  Serial.println("out 5 off");
-  client.publish(topic5.c_str(), "false", true);
-}
+unsigned long epochTime;
 
 void writeStringToFlash(const char *toStore, int startAddr)
 {
@@ -220,13 +152,555 @@ String getValue(String data, char separator, int index)
   return found > index ? data.substring(strIndex[0], strIndex[1]) : "";
 }
 
+void notif(uint8_t index, uint8_t state, uint8_t type)
+{
+
+  DynamicJsonDocument notif_data(128);
+  String string_notif_data;
+
+  api_endpoint = String("http://mikiko.herokuapp.com/notif/" + MACADD);
+
+  notif_data["type"] = type; // 1 schedule // 2 sensor
+  notif_data["index"] = index;
+  notif_data["state"] = state;
+
+  serializeJson(notif_data, string_notif_data);
+
+  http.begin(http_notif, api_endpoint.c_str());
+  http.addHeader("Content-Type", "application/json");
+
+  if (http.POST(string_notif_data) > 0)
+  {
+    Serial.println(http.getString());
+  }
+  else
+  {
+    Serial.println("error notif");
+  }
+
+  http.end();
+}
+
+void out1_on()
+{
+  digitalWrite(out1, LOW);
+  notif(0, 1, 1);
+  client.publish(topic1.c_str(), "true", true);
+}
+
+void out1_off()
+{
+  digitalWrite(out1, HIGH);
+  notif(0, 0, 1);
+  client.publish(topic1.c_str(), "false", true);
+}
+
+void out2_on()
+{
+  digitalWrite(out2, HIGH);
+  notif(1, 1, 1);
+  client.publish(topic2.c_str(), "true", true);
+}
+
+void out2_off()
+{
+  digitalWrite(out2, LOW);
+  notif(1, 0, 1);
+  client.publish(topic2.c_str(), "false", true);
+}
+
+void out3_on()
+{
+  digitalWrite(out3, HIGH);
+  notif(2, 1, 1);
+  client.publish(topic3.c_str(), "true", true);
+}
+
+void out3_off()
+{
+  digitalWrite(out3, LOW);
+  notif(2, 0, 1);
+  client.publish(topic3.c_str(), "false", true);
+}
+
+void out4_on()
+{
+  digitalWrite(out4, HIGH);
+  notif(3, 1, 1);
+  client.publish(topic4.c_str(), "true", true);
+}
+
+void out4_off()
+{
+  digitalWrite(out4, LOW);
+  notif(3, 0, 1);
+  client.publish(topic4.c_str(), "false", true);
+}
+
+void out5_on()
+{
+  digitalWrite(out5, HIGH);
+  notif(4, 1, 1);
+  client.publish(topic5.c_str(), "true", true);
+}
+
+void out5_off()
+{
+  digitalWrite(out5, LOW);
+  notif(4, 0, 1);
+  client.publish(topic5.c_str(), "false", true);
+}
+
+void removeSchedule(CronID_t triggerCron)
+{
+
+  for (size_t i = 0; i < schedule.size(); i++)
+  {
+    String schedule_id = schedule[i]["id"];
+    CronID_t cron_id = schedule[i]["cronId"];
+    String cron_data = schedule[i]["data"];
+
+    if (triggerCron == cron_id)
+    {
+
+      Serial.print("remove CronId = ");
+      Serial.println(cron_id);
+
+      DynamicJsonDocument http_data_remove(128);
+      String string_http_data_remove;
+
+      api_endpoint = String("http://mikiko.herokuapp.com/schedule/remove/" + MACADD);
+
+      http_data_remove["id"] = schedule_id;
+      http_data_remove["data"] = cron_data;
+
+      serializeJson(http_data_remove, string_http_data_remove);
+
+      http.begin(mikiko_client, api_endpoint.c_str());
+      http.addHeader("Content-Type", "application/json");
+
+      if (http.POST(string_http_data_remove) > 0)
+      {
+        Serial.print("HTTP Response code remove : ");
+        Serial.println(http.getString());
+      }
+      else
+      {
+        Serial.print("Error code remove : ");
+      }
+      // Free resources
+      http.end();
+
+      // http_data_remove.clear();
+
+      Cron.free(cron_id);
+      cron_id = dtINVALID_ALARM_ID;
+      schedule.remove(i);
+
+      break;
+    }
+  }
+
+  serializeJson(schedule, Serial);
+}
+
+void out1_on_once()
+{
+  out1_on();
+
+  removeSchedule(Cron.getTriggeredCronId());
+}
+
+void out1_off_once()
+{
+  out1_off();
+
+  removeSchedule(Cron.getTriggeredCronId());
+}
+
+void out2_on_once()
+{
+  out2_on();
+
+  removeSchedule(Cron.getTriggeredCronId());
+}
+
+void out2_off_once()
+{
+  out2_off();
+
+  removeSchedule(Cron.getTriggeredCronId());
+}
+
+void out3_on_once()
+{
+  out3_on();
+
+  removeSchedule(Cron.getTriggeredCronId());
+}
+
+void out3_off_once()
+{
+  out3_off();
+
+  removeSchedule(Cron.getTriggeredCronId());
+}
+
+void out4_on_once()
+{
+  out4_on();
+
+  removeSchedule(Cron.getTriggeredCronId());
+}
+
+void out4_off_once()
+{
+  out4_off();
+
+  removeSchedule(Cron.getTriggeredCronId());
+}
+
+void out5_on_once()
+{
+  out5_on();
+
+  removeSchedule(Cron.getTriggeredCronId());
+}
+
+void out5_off_once()
+{
+  out5_off();
+
+  removeSchedule(Cron.getTriggeredCronId());
+}
+
+void schedule_check()
+{
+  for (size_t j = 0; j < schedule.size(); j++)
+  {
+    String cron_data = schedule[j]["data"];
+    String cron_string = getValue(cron_data, 58, 0);                // cron data
+    String output = getValue(cron_data, 58, 1);                     // output
+    bool state = getValue(cron_data, 58, 2) == "1" ? true : false;  // output state
+    bool repeat = getValue(cron_data, 58, 3) == "1" ? true : false; // ?repeat
+    bool status = getValue(cron_data, 58, 4) == "1" ? true : false; // ?schedule status
+
+    if (output == "out1" && status == true)
+    {
+      if (repeat == true)
+      {
+        if (state == true)
+        {
+          id = Cron.create(cron_string.c_str(), out1_on_once, true);
+          schedule[j]["cronId"] = id;
+        }
+        else
+        {
+          id = Cron.create(cron_string.c_str(), out1_off_once, true);
+          schedule[j]["cronId"] = id;
+        }
+      }
+      else
+      {
+        if (state == true)
+        {
+          id = Cron.create(cron_string.c_str(), out1_on, false);
+          schedule[j]["cronId"] = id;
+        }
+        else
+        {
+          id = Cron.create(cron_string.c_str(), out1_off, false);
+          schedule[j]["cronId"] = id;
+        }
+      }
+    }
+    else if (output == "out2" && status == true)
+    {
+      if (repeat == true)
+      {
+        if (state == true)
+        {
+          id = Cron.create(cron_string.c_str(), out2_on_once, true);
+          schedule[j]["cronId"] = id;
+        }
+        else
+        {
+          id = Cron.create(cron_string.c_str(), out2_off_once, true);
+          schedule[j]["cronId"] = id;
+        }
+      }
+      else
+      {
+        if (state == true)
+        {
+          id = Cron.create(cron_string.c_str(), out2_on, false);
+          schedule[j]["cronId"] = id;
+        }
+        else
+        {
+          id = Cron.create(cron_string.c_str(), out2_off, false);
+          schedule[j]["cronId"] = id;
+        }
+      }
+    }
+    else if (output == "out3" && status == true)
+    {
+      if (repeat == true)
+      {
+        if (state == true)
+        {
+          id = Cron.create(cron_string.c_str(), out3_on_once, true);
+          schedule[j]["cronId"] = id;
+        }
+        else
+        {
+          id = Cron.create(cron_string.c_str(), out3_off_once, true);
+          schedule[j]["cronId"] = id;
+        }
+      }
+      else
+      {
+        if (state == true)
+        {
+          id = Cron.create(cron_string.c_str(), out3_on, false);
+          schedule[j]["cronId"] = id;
+        }
+        else
+        {
+          id = Cron.create(cron_string.c_str(), out3_off, false);
+          schedule[j]["cronId"] = id;
+        }
+      }
+    }
+    else if (output == "out4" && status == true)
+    {
+      if (repeat == true)
+      {
+        if (state == true)
+        {
+          id = Cron.create(cron_string.c_str(), out4_on_once, true);
+          schedule[j]["cronId"] = id;
+        }
+        else
+        {
+          id = Cron.create(cron_string.c_str(), out4_off_once, true);
+          schedule[j]["cronId"] = id;
+        }
+      }
+      else
+      {
+        if (state == true)
+        {
+          id = Cron.create(cron_string.c_str(), out4_on, false);
+          schedule[j]["cronId"] = id;
+        }
+        else
+        {
+          id = Cron.create(cron_string.c_str(), out4_off, false);
+          schedule[j]["cronId"] = id;
+        }
+      }
+    }
+    else if (output == "out5" && status == true)
+    {
+      if (repeat == true)
+      {
+        if (state == true)
+        {
+          id = Cron.create(cron_string.c_str(), out5_on_once, true);
+          schedule[j]["cronId"] = id;
+        }
+        else
+        {
+          id = Cron.create(cron_string.c_str(), out5_off_once, true);
+          schedule[j]["cronId"] = id;
+        }
+      }
+      else
+      {
+        if (state == true)
+        {
+          id = Cron.create(cron_string.c_str(), out5_on, false);
+          schedule[j]["cronId"] = id;
+        }
+        else
+        {
+          id = Cron.create(cron_string.c_str(), out5_off, false);
+          schedule[j]["cronId"] = id;
+        }
+      }
+    }
+  }
+}
+
+void schedule_edit_check(DynamicJsonDocument schedule_data)
+{
+  String cron_data = schedule_data["data"];
+  String cron_string = getValue(cron_data, 58, 0);                // cron data
+  String output = getValue(cron_data, 58, 1);                     // output
+  bool state = getValue(cron_data, 58, 2) == "1" ? true : false;  // output state
+  bool repeat = getValue(cron_data, 58, 3) == "1" ? true : false; // ?repeat
+  bool status = getValue(cron_data, 58, 4) == "1" ? true : false; // ?schedule status
+  uint8_t schedule_size = schedule.size();
+
+  if (output == "out1" && status == true)
+  {
+    if (repeat == true)
+    {
+      if (state == true)
+      {
+        id = Cron.create(cron_string.c_str(), out1_on_once, true);
+        schedule[schedule_size]["cronId"] = id;
+      }
+      else
+      {
+        id = Cron.create(cron_string.c_str(), out1_off_once, true);
+        schedule[schedule_size]["cronId"] = id;
+      }
+    }
+    else
+    {
+      if (state == true)
+      {
+        id = Cron.create(cron_string.c_str(), out1_on, false);
+        schedule[schedule_size]["cronId"] = id;
+      }
+      else
+      {
+        id = Cron.create(cron_string.c_str(), out1_off, false);
+        schedule[schedule_size]["cronId"] = id;
+      }
+    }
+  }
+  else if (output == "out2" && status == true)
+  {
+    if (repeat == true)
+    {
+      if (state == true)
+      {
+        id = Cron.create(cron_string.c_str(), out2_on_once, true);
+        schedule[schedule_size]["cronId"] = id;
+      }
+      else
+      {
+        id = Cron.create(cron_string.c_str(), out2_off_once, true);
+        schedule[schedule_size]["cronId"] = id;
+      }
+    }
+    else
+    {
+      if (state == true)
+      {
+        id = Cron.create(cron_string.c_str(), out2_on, false);
+        schedule[schedule_size]["cronId"] = id;
+      }
+      else
+      {
+        id = Cron.create(cron_string.c_str(), out2_off, false);
+        schedule[schedule_size]["cronId"] = id;
+      }
+    }
+  }
+  else if (output == "out3" && status == true)
+  {
+    if (repeat == true)
+    {
+      if (state == true)
+      {
+        id = Cron.create(cron_string.c_str(), out3_on_once, true);
+        schedule[schedule_size]["cronId"] = id;
+      }
+      else
+      {
+        id = Cron.create(cron_string.c_str(), out3_off_once, true);
+        schedule[schedule_size]["cronId"] = id;
+      }
+    }
+    else
+    {
+      if (state == true)
+      {
+        id = Cron.create(cron_string.c_str(), out3_on, false);
+        schedule[schedule_size]["cronId"] = id;
+      }
+      else
+      {
+        id = Cron.create(cron_string.c_str(), out3_off, false);
+        schedule[schedule_size]["cronId"] = id;
+      }
+    }
+  }
+  else if (output == "out4" && status == true)
+  {
+    if (repeat == true)
+    {
+      if (state == true)
+      {
+        id = Cron.create(cron_string.c_str(), out4_on_once, true);
+        schedule[schedule_size]["cronId"] = id;
+      }
+      else
+      {
+        id = Cron.create(cron_string.c_str(), out4_off_once, true);
+        schedule[schedule_size]["cronId"] = id;
+      }
+    }
+    else
+    {
+      if (state == true)
+      {
+        id = Cron.create(cron_string.c_str(), out4_on, false);
+        schedule[schedule_size]["cronId"] = id;
+      }
+      else
+      {
+        id = Cron.create(cron_string.c_str(), out4_off, false);
+        schedule[schedule_size]["cronId"] = id;
+      }
+    }
+  }
+  else if (output == "out5" && status == true)
+  {
+    if (repeat == true)
+    {
+      if (state == true)
+      {
+        id = Cron.create(cron_string.c_str(), out5_on_once, true);
+        schedule[schedule_size]["cronId"] = id;
+      }
+      else
+      {
+        id = Cron.create(cron_string.c_str(), out5_off_once, true);
+        schedule[schedule_size]["cronId"] = id;
+      }
+    }
+    else
+    {
+      if (state == true)
+      {
+        id = Cron.create(cron_string.c_str(), out5_on, false);
+        schedule[schedule_size]["cronId"] = id;
+      }
+      else
+      {
+        id = Cron.create(cron_string.c_str(), out5_off, false);
+        schedule[schedule_size]["cronId"] = id;
+      }
+    }
+  }
+
+  schedule[schedule_size]["id"] = schedule_data["id"];
+  schedule[schedule_size]["data"] = schedule_data["data"];
+
+  serializeJson(schedule, Serial);
+}
+
 void btnLongPress()
 {
-  writeStringToFlash("", 0);  // Reset the SSID
-  writeStringToFlash("", 40); // Reset the Password
-  writeStringToFlash("", 80); // Reset gmt
-  Serial.println("Wifi credentials erased");
-  Serial.println("Restarting the ESP");
+  writeStringToFlash("", 0);
+  writeStringToFlash("", 20);
+  writeStringToFlash("", 40);
+  ESP.restart();
   delay(500);
   ESP.restart();
 }
@@ -240,6 +714,8 @@ void sensorRead()
     h = 0;
     t = 0;
   }
+
+  // Serial.println(analogRead(kelembabanTanahPin));
 
   kelembabanTanah = map(analogRead(kelembabanTanahPin), 4095, 0, 0, 100);
 
@@ -258,44 +734,6 @@ void sensorRead()
   phTanahValue = (-0.0693 * phADCval) + 7.3855;
 }
 
-void fcsDownloadCallback(FCS_DownloadStatusInfo info)
-{
-  if (info.status == fb_esp_fcs_download_status_init)
-  {
-    Serial.printf("Downloading firmware %s (%d)\n", info.remoteFileName.c_str(), info.fileSize);
-    lcd.clear();
-    lcd.setCursor(0, 1);
-    lcd.print("Downloading firmware");
-    delay(1000);
-  }
-  else if (info.status == fb_esp_fcs_download_status_download)
-  {
-    Serial.printf("Downloaded %d%s\n", (int)info.progress, "%");
-    lcd.clear();
-    lcd.setCursor(3, 1);
-    lcd.printf("Downloaded %d%s\n", (int)info.progress, "%");
-  }
-  else if (info.status == fb_esp_fcs_download_status_complete)
-  {
-    lcd.clear();
-    lcd.setCursor(0, 1);
-    lcd.print("installing firmware!");
-    Serial.println("Update firmware completed.");
-    Serial.println();
-    Serial.println("Restarting...\n\n");
-    delay(3000);
-    lcd.clear();
-    lcd.setCursor(8, 1);
-    lcd.print("Done");
-    delay(1000);
-    ESP.restart();
-  }
-  else if (info.status == fb_esp_fcs_download_status_error)
-  {
-    Serial.printf("Download firmware failed, %s\n", info.errorMsg.c_str());
-  }
-}
-
 void mqtt_process(char *topic, byte *payload)
 {
 
@@ -303,6 +741,9 @@ void mqtt_process(char *topic, byte *payload)
   String strTopic;
 
   strTopic = String((char *)topic);
+
+  Serial.println(strTopic);
+
   if (strTopic == topic1)
   {
 
@@ -312,11 +753,11 @@ void mqtt_process(char *topic, byte *payload)
 
     if (msg == "true")
     {
-      digitalWrite(out1, LOW);
+      digitalWrite(out1, HIGH);
     }
     else
     {
-      digitalWrite(out1, HIGH);
+      digitalWrite(out1, LOW);
     }
   }
   else if (strTopic == topic2)
@@ -381,198 +822,90 @@ void mqtt_process(char *topic, byte *payload)
       digitalWrite(out5, LOW);
     }
   }
-  else if (strTopic == "data/t")
-  {
-
-    msg = String((char *)payload);
-
-    Cron.create(msg.c_str(), out1_on, false);
-  }
-  else if (strTopic == fwUpdate_topic)
-  {
-    if (!Firebase.Storage.downloadOTA(&fbdo, STORAGE_BUCKET_ID, "/SONMIKIKO/firmware.bin", fcsDownloadCallback))
-      Serial.println(fbdo.errorReason());
-    // gs://mikiko-c5ca4.appspot.com/SONMIKIKO/firmware.bin
-  }
   else if (strTopic == schedule_topic)
   {
 
-    DynamicJsonDocument schedule(2045 * 2);
-    StaticJsonDocument<114> filter;
+    DynamicJsonDocument schedule_payload(512);
 
-    filter["fields"]["schedule"]["arrayValue"]["values"][0]["mapValue"] = true;
+    msg = String((char *)payload);
 
-    if (Firebase.Firestore.getDocument(&fbdo, FIREBASE_PROJECT_ID, "", documentPath.c_str(), "schedule"))
+    deserializeJson(schedule_payload, msg.c_str());
+
+    serializeJson(schedule_payload, Serial);
+
+    Serial.println("---------");
+
+    if (schedule_payload["type"] == "11") // add schedule
     {
-      Serial.printf("ok\n%s\n\n", fbdo.payload().c_str());
-
-      for (byte i = 0; i < 51; i++)
+      schedule_edit_check(schedule_payload);
+    }
+    else if (schedule_payload["type"] == "22") // remove schedule
+    {
+      for (size_t i = 0; i < schedule.size(); i++)
       {
-        Cron.free(i);
-      }
-
-      DeserializationError error = deserializeJson(schedule, fbdo.payload().c_str(), DeserializationOption::Filter(filter));
-
-      if (error)
-      {
-        Serial.print(F("deserializeJson() failed: "));
-        Serial.println(error.f_str());
-        return;
-      }
-
-      for (int j = 0; j < schedule["fields"]["schedule"]["arrayValue"]["values"].size(); j++)
-      {
-        // String cron_id = schedule["fields"]["schedule"]["arrayValue"]["values"][j]["mapValue"]["fields"]["id"]["stringValue"];
-        String cron_data = schedule["fields"]["schedule"]["arrayValue"]["values"][j]["mapValue"]["fields"]["data"]["stringValue"];
-        String cron_string = getValue(cron_data, 58, 0);
-        String output = getValue(cron_data, 58, 1);
-        bool state = getValue(cron_data, 58, 2) == "1" ? true : false;
-        bool status = getValue(cron_data, 58, 3) == "1" ? true : false;
-
-        // Serial.print("cron is =");
-        // Serial.print(cron_string);
-        // Serial.println("end");
-        // Serial.print("output is = ");
-        // Serial.println(output);
-        // Serial.print("status is = ");
-        // Serial.println(state);
-        // Serial.print("repeat is = ");
-        // Serial.println(repeat);
-        // Serial.print("status is = ");
-        // Serial.println(status);
-
-        if (output == "out1" && status == true)
+        if (schedule[i]["id"] == schedule_payload["id"])
         {
-          // if (repeat == true)
-          // {
-          //   if (state == true)
-          //   {
-          //     Cron.create(cron_string.c_str(), out1_on_once, true);
-          //   }
-          //   else
-          //   {
-          //     Cron.create(cron_string.c_str(), out1_off_once, true);
-          //   }
-          // }
-          // else
-          // {
-          if (state == true)
-          {
-            Cron.create(cron_string.c_str(), out1_on, false);
-          }
-          else
-          {
-            Cron.create(cron_string.c_str(), out1_off, false);
-          }
-          // }
-        }
-        else if (output == "out2" && status == true)
-        {
-          // if (repeat == true)
-          // {
-          //   if (state == true)
-          //   {
-          //     Cron.create(cron_string.c_str(), out2_on_once, true);
-          //   }
-          //   else
-          //   {
-          //     Cron.create(cron_string.c_str(), out2_off_once, true);
-          //   }
-          // }
-          // else
-          // {
-          if (state == true)
-          {
-            Cron.create(cron_string.c_str(), out2_on, false);
-          }
-          else
-          {
-            Cron.create(cron_string.c_str(), out2_off, false);
-          }
-          // }
-        }
-        else if (output == "out3" && status == true)
-        {
-          // if (repeat == true)
-          // {
-          //   if (state == true)
-          //   {
-          //     Cron.create(cron_string.c_str(), out3_on_once, true);
-          //   }
-          //   else
-          //   {
-          //     Cron.create(cron_string.c_str(), out3_off_once, true);
-          //   }
-          // }
-          // else
-          // {
-          if (state == true)
-          {
-            Cron.create(cron_string.c_str(), out3_on, false);
-          }
-          else
-          {
-            Cron.create(cron_string.c_str(), out3_off, false);
-          }
-          // }
-        }
-        else if (output == "out4" && status == true)
-        {
-          // if (repeat == true)
-          // {
-          //   if (state == true)
-          //   {
-          //     Cron.create(cron_string.c_str(), out4_on_once, true);
-          //   }
-          //   else
-          //   {
-          //     Cron.create(cron_string.c_str(), out4_off_once, true);
-          //   }
-          // }
-          // else
-          // {
-          if (state == true)
-          {
-            Cron.create(cron_string.c_str(), out4_on, false);
-          }
-          else
-          {
-            Cron.create(cron_string.c_str(), out4_off, false);
-          }
-        }
-        else if (output == "out5" && status == true)
-        {
-          // if (repeat == true)
-          // {
-          //   if (state == true)
-          //   {
-          //     Cron.create(cron_string.c_str(), out4_on_once, true);
-          //   }
-          //   else
-          //   {
-          //     Cron.create(cron_string.c_str(), out4_off_once, true);
-          //   }
-          // }
-          // else
-          // {
-          if (state == true)
-          {
-            Cron.create(cron_string.c_str(), out5_on, false);
-          }
-          else
-          {
-            Cron.create(cron_string.c_str(), out5_off, false);
-          }
-          // }
+          CronID_t cron_id = schedule[i]["cronId"];
+
+          Cron.free(cron_id);
+          cron_id = dtINVALID_ALARM_ID;
+          schedule.remove(i);
+
+          Serial.printf("schedule index ke-%d dihapus", i);
+
+          break;
         }
       }
     }
-    else
+    else if (schedule_payload["type"] == "33") // edit schedule
     {
-      Serial.println(fbdo.errorReason());
-    }
+      for (size_t i = 0; i < schedule.size(); i++)
+      {
+        if (schedule[i]["id"] == schedule_payload["id"])
+        {
+          CronID_t cron_id = schedule[i]["cronId"];
 
-    schedule.clear();
+          Cron.free(cron_id);
+          cron_id = dtINVALID_ALARM_ID;
+          schedule.remove(i);
+
+          schedule_edit_check(schedule_payload);
+
+          break;
+        }
+      }
+    }
+  }
+  else if (strTopic == fwUpdate_topic)
+  {
+    msg = String((char *)payload);
+  }
+}
+
+void reconnect_to_mqtt()
+{
+  Serial.printf("The client %s connects to the public mqtt broker\n", client_id.c_str());
+  if (client.connect(client_id.c_str(), mqtt_username, mqtt_password, MACADD.c_str(), 2, true, "false"))
+  {
+
+    client.subscribe(topic1.c_str());
+    client.subscribe(topic2.c_str());
+    client.subscribe(topic3.c_str());
+    client.subscribe(topic4.c_str());
+    client.subscribe(topic5.c_str());
+
+    client.subscribe(schedule_topic.c_str());
+
+    client.subscribe(fwUpdate_topic.c_str());
+    client.publish(fwVersion_topic.c_str(), FIRMWARE_VERSION, true);
+
+    client.publish(MACADD.c_str(), "true", true);
+  }
+  else
+  {
+    Serial.print("failed with state ");
+    Serial.print(client.state());
+    delay(2000);
   }
 }
 
@@ -594,6 +927,8 @@ void callback(char *topic, byte *payload, unsigned int length)
   mqtt_process(topic, payload);
 }
 
+// ==================================================================
+
 void setup()
 {
   Serial.begin(115200);
@@ -605,15 +940,9 @@ void setup()
   }
   else
   {
-    ssid = readStringFromFlash(0); // Read SSID stored at address 0
-    Serial.print("SSID = ");
-    Serial.println(ssid);
-    pss = readStringFromFlash(40); // Read Password stored at address 40
-    Serial.print("psss = ");
-    Serial.println(pss);
-    gmt = readStringFromFlash(80); // Read Password stored at address 80
-    Serial.print("gmt = ");
-    Serial.println(gmt);
+    ssid = readStringFromFlash(0);
+    pss = readStringFromFlash(20);
+    gmt = readStringFromFlash(40);
   }
 
   MACADD = String(WiFi.macAddress());
@@ -626,11 +955,14 @@ void setup()
   String str_reply = String("SON:5CH:" + String(lround(ESP.getEfuseMac() / 1234)) + ":MIKIKO");
   char replyPacket[str_reply.length() + 1];
 
+  api_endpoint = String("http://mikiko.herokuapp.com/schedule/getall/" + MACADD);
+
   topic1 = String("/" + String(MACADD) + "/data/btn1");
   topic2 = String("/" + String(MACADD) + "/data/btn2");
   topic3 = String("/" + String(MACADD) + "/data/btn3");
   topic4 = String("/" + String(MACADD) + "/data/btn4");
   topic5 = String("/" + String(MACADD) + "/data/btn5");
+  rain_topic = String("/" + MACADD + "/data/weather");
 
   fwVersion_topic = String("/" + MACADD + "/data/firmwareversion");
   fwUpdate_topic = String("/" + String(MACADD) + "/data/ota");
@@ -638,7 +970,6 @@ void setup()
 
   schedule_topic = String("/" + String(MACADD) + "/data/schedule");
 
-  documentPath = String("devices/" + MACADD);
   strcpy(replyPacket, str_reply.c_str());
 
   lcd.begin();
@@ -646,8 +977,9 @@ void setup()
   dht.begin();
   btn.tick();
 
-  pinMode(BUILTIN_LED, OUTPUT);
   pinMode(pinSensorHujan, INPUT);
+  pinMode(DHTPIN, INPUT);
+  pinMode(kelembabanTanahPin, INPUT);
   pinMode(23, INPUT);
   pinMode(out1, OUTPUT);
   pinMode(out2, OUTPUT);
@@ -656,13 +988,17 @@ void setup()
   pinMode(out5, OUTPUT);
 
   digitalWrite(out1, HIGH);
+  digitalWrite(out2, LOW);
+  digitalWrite(out3, LOW);
+  digitalWrite(out4, LOW);
+  digitalWrite(out5, LOW);
 
   btn.attachLongPressStart(btnLongPress);
   btn.setPressTicks(2000);
 
-  // writeStringToFlash("", 0);
-  // writeStringToFlash("", 40);
-  // writeStringToFlash("", 80);
+  // writeStringToFlash("Mikikotech", 0);
+  // writeStringToFlash("6jt/bulan", 20);
+  // writeStringToFlash("8", 40);
 
   if (ssid.length() > 0 && pss.length() > 0)
   {
@@ -714,7 +1050,7 @@ void setup()
         udp.read(udpbuf, 3);
         Serial.print("message = ");
         Serial.print(udpbuf);
-        writeStringToFlash(udpbuf, 80);
+        // writeStringToFlash(udpbuf, 40);
         gmt = udpbuf;
         Serial.print(", from =");
         Serial.print(udp.remoteIP());
@@ -736,7 +1072,7 @@ void setup()
     pss = WiFi.psk();
 
     writeStringToFlash(ssid.c_str(), 0);
-    writeStringToFlash(pss.c_str(), 40);
+    writeStringToFlash(pss.c_str(), 20);
   }
 
   lcd.clear();
@@ -745,18 +1081,8 @@ void setup()
   lcd.setCursor((20 - ssid.length()) / 2, 2);
   lcd.print(ssid);
 
-  // WiFi.setAutoReconnect(true);
-  // WiFi.persistent(true);
-
-  // wifi_state = true;
-
-  // client.enableDebuggingMessages();
-  // client.enableHTTPWebUpdater(MACADD.c_str(), "");
-  // client.enableOTA();
-  // client.enableLastWillMessage(MACADD.c_str(), "false", true);
-
-  config.api_key = API_KEY;
-  config.database_url = DATABASE_URL;
+  WiFi.setAutoReconnect(true);
+  WiFi.persistent(true);
 
   configTime(0, gmt.toInt() * 3600, "pool.ntp.org");
 
@@ -771,331 +1097,41 @@ void setup()
 
   while (!client.connected())
   {
-    String client_id = "esp8266-client-";
-    client_id += String(WiFi.macAddress());
-    Serial.printf("The client %s connects to the public mqtt broker\n", client_id.c_str());
-    if (client.connect(client_id.c_str(), mqtt_username, mqtt_password, MACADD.c_str(), 2, true, "false"))
-    {
-      client.subscribe(topic1.c_str());
-      client.subscribe(topic2.c_str());
-      client.subscribe(topic3.c_str());
-      client.subscribe(topic4.c_str());
-      client.subscribe(topic5.c_str());
-
-      client.subscribe("data/t");
-
-      client.subscribe(schedule_topic.c_str());
-
-      client.subscribe(fwUpdate_topic.c_str());
-      client.publish(fwVersion_topic.c_str(), FIRMWARE_VERSION, true);
-
-      client.publish(MACADD.c_str(), "true", true);
-    }
-    else
-    {
-      Serial.print("failed with state ");
-      Serial.print(client.state());
-      delay(2000);
-    }
+    reconnect_to_mqtt();
   }
 
-  auth.user.email = DEVICE_EMAIL;
-  auth.user.password = DEVICE_PASS;
+  http.begin(mikiko_client, api_endpoint.c_str());
 
-  config.token_status_callback = tokenStatusCallback;
+  if (http.GET() > 0)
+  {
+    Serial.print("HTTP Response code: ");
+    deserializeJson(schedule, http.getString().c_str());
 
-  fbdo.setResponseSize(4095);
-  Firebase.begin(&config, &auth);
-  Firebase.reconnectWiFi(true);
+    if (schedule.size() > 0)
+    {
+      schedule_check();
+    }
+  }
+  else
+  {
+    Serial.print("Error code: ");
+    // Serial.println(http.GET());
+  }
 
-  sendTime = String(hour + ":" + minutes);
+  http.end();
 
-  // sensorRead();
+  delay(2000);
 
-  // json.set("/temp", t);
-  // json.set("/hum", h);
-  // json.set("/soil", kelembabanTanah);
-  // json.set("/ph", phTanahValue);
-  // json.set("/time", sendTime);
-
-  // Firebase.RTDB.pushJSON(&fbdo, "/" + MACADD + "/Sensor", &json);
-
-  // Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/temp", t);
-  // Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/humi", h);
-  // Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/soil", kelembabanTanah);
-  // Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/ph", phTanahValue);
+  lcd.clear();
+  lcd.setCursor(4, 1);
+  lcd.print("Connected !!");
+  delay(2000);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(" MIKIKO TECHNOLOGY ");
+  lcd.setCursor(0, 1);
+  lcd.print("--------------------");
 }
-
-// void onConnectionEstablished()
-// {
-//   client.publish(String("/" + MACADD + "/data/weather"), "false", false);
-//   client.publish(String("/" + MACADD + "/data/firmwareversion"), FIRMWARE_VERSION, true);
-//   client.publish(MACADD.c_str(), "true", true);
-
-//   client.subscribe(String("/" + MACADD + "/data/btn1"), [](const String &payload)
-//                    {
-//                      Serial.println(payload);
-
-//                      if (payload == "true")
-//                      {
-//                        digitalWrite(out1, LOW);
-//                      }
-//                      else
-//                      {
-//                        digitalWrite(out1, HIGH);
-//                      } });
-//   client.subscribe(String("/" + MACADD + "/data/btn2"), [](const String &payload)
-//                    {
-//                      Serial.println(payload);
-
-//                      if (payload == "true")
-//                      {
-//                        digitalWrite(out2, LOW);
-//                      }
-//                      else
-//                      {
-//                        digitalWrite(out2, HIGH);
-//                      } });
-
-//   client.subscribe(String("/" + MACADD + "/data/btn3"), [](const String &payload)
-//                    {
-//                      Serial.println(payload);
-
-//                      if (payload == "true")
-//                      {
-//                        digitalWrite(out3, LOW);
-//                      }
-//                      else
-//                      {
-//                        digitalWrite(out3, HIGH);
-//                      } });
-
-//   client.subscribe(String("/" + MACADD + "/data/btn4"), [](const String &payload)
-//                    {
-//                      Serial.println(payload);
-
-//                      if (payload == "true")
-//                      {
-//                        digitalWrite(out4, LOW);
-//                      }
-//                      else
-//                      {
-//                        digitalWrite(out4, HIGH);
-//                      } });
-
-//   client.subscribe(String("/" + MACADD + "/data/btn5"), [](const String &payload)
-//                    {
-//                      Serial.println(payload);
-
-//                      if (payload == "true")
-//                      {
-//                        digitalWrite(out5, LOW);
-//                      }
-//                      else
-//                      {
-//                        digitalWrite(out5, HIGH);
-//                      } });
-
-//   client.subscribe(String("/" + MACADD + "/data/ota"), [](const String &payload)
-//                    {if(payload == "true"){
-//                      if (!Firebase.Storage.downloadOTA(&fbdo, STORAGE_BUCKET_ID, "MTH/firmware.bin", fcsDownloadCallback))
-//                         Serial.println(fbdo.errorReason());
-//                     } });
-
-//   client.subscribe(String("/" + MACADD + "/data/schedule"), [](const String &payload)
-//                    {
-//                      DynamicJsonDocument schedule(2045 * 2);
-//                      StaticJsonDocument<114> filter;
-
-//                      filter["fields"]["schedule"]["arrayValue"]["values"][0]["mapValue"] = true;
-
-//                      Serial.println("schedule");
-
-//                      if (Firebase.Firestore.getDocument(&fbdo, FIREBASE_PROJECT_ID, "", documentPath.c_str(), "schedule"))
-//                      {
-//                        Serial.printf("ok\n%s\n\n", fbdo.payload().c_str());
-
-//                        for (byte i = 0; i < 51; i++)
-//                        {
-//                          Cron.free(i);
-//                        }
-
-//                        DeserializationError error = deserializeJson(schedule, fbdo.payload().c_str(), DeserializationOption::Filter(filter));
-
-//                        if (error)
-//                        {
-//                          Serial.print(F("deserializeJson() failed: "));
-//                          Serial.println(error.f_str());
-//                          return;
-//                        }
-
-//                        for (int j = 0; j < schedule["fields"]["schedule"]["arrayValue"]["values"].size(); j++)
-//                        {
-//                          // String cron_id = schedule["fields"]["schedule"]["arrayValue"]["values"][j]["mapValue"]["fields"]["id"]["stringValue"];
-//                          String cron_data = schedule["fields"]["schedule"]["arrayValue"]["values"][j]["mapValue"]["fields"]["data"]["stringValue"];
-//                          String cron_string = getValue(cron_data, 58, 0);
-//                          String output = getValue(cron_data, 58, 1);
-//                          bool state = getValue(cron_data, 58, 2) == "1" ? true : false;
-//                          bool status = getValue(cron_data, 58, 3) == "1" ? true : false;
-
-//                          Serial.print("cron is =");
-//                          Serial.print(cron_string);
-//                          Serial.println("end");
-//                          Serial.print("output is = ");
-//                          Serial.println(output);
-//                          Serial.print("status is = ");
-//                          Serial.println(state);
-//                          Serial.print("status is = ");
-//                          Serial.println(status);
-
-//                          if (output == "out1" && status == true)
-//                          {
-//                            // if (repeat == true)
-//                            // {
-//                            //   if (state == true)
-//                            //   {
-//                            //     Cron.create(cron_string.c_str(), out1_on_once, true);
-//                            //   }
-//                            //   else
-//                            //   {
-//                            //     Cron.create(cron_string.c_str(), out1_off_once, true);
-//                            //   }
-//                            // }
-//                            // else
-//                            // {
-//                            if (state == true)
-//                            {
-//                              Cron.create(cron_string.c_str(), out1_on, false);
-//                            }
-//                            else
-//                            {
-//                              Cron.create(cron_string.c_str(), out1_off, false);
-//                            }
-//                            // }
-//                          }
-//                          else if (output == "out2" && status == true)
-//                          {
-//                            // if (repeat == true)
-//                            // {
-//                            //   if (state == true)
-//                            //   {
-//                            //     Cron.create(cron_string.c_str(), out2_on_once, true);
-//                            //   }
-//                            //   else
-//                            //   {
-//                            //     Cron.create(cron_string.c_str(), out2_off_once, true);
-//                            //   }
-//                            // }
-//                            // else
-//                            // {
-//                            if (state == true)
-//                            {
-//                              Cron.create(cron_string.c_str(), out2_on, false);
-//                            }
-//                            else
-//                            {
-//                              Cron.create(cron_string.c_str(), out2_off, false);
-//                            }
-//                            // }
-//                          }
-//                          else if (output == "out3" && status == true)
-//                          {
-//                            // if (repeat == true)
-//                            // {
-//                            //   if (state == true)
-//                            //   {
-//                            //     Cron.create(cron_string.c_str(), out3_on_once, true);
-//                            //   }
-//                            //   else
-//                            //   {
-//                            //     Cron.create(cron_string.c_str(), out3_off_once, true);
-//                            //   }
-//                            // }
-//                            // else
-//                            // {
-//                            if (state == true)
-//                            {
-//                              Cron.create(cron_string.c_str(), out3_on, false);
-//                            }
-//                            else
-//                            {
-//                              Cron.create(cron_string.c_str(), out3_off, false);
-//                            }
-//                            // }
-//                          }
-//                          else if (output == "out4" && status == true)
-//                          {
-//                            // if (repeat == true)
-//                            // {
-//                            //   if (state == true)
-//                            //   {
-//                            //     Cron.create(cron_string.c_str(), out4_on_once, true);
-//                            //   }
-//                            //   else
-//                            //   {
-//                            //     Cron.create(cron_string.c_str(), out4_off_once, true);
-//                            //   }
-//                            // }
-//                            // else
-//                            // {
-//                            if (state == true)
-//                            {
-//                              Cron.create(cron_string.c_str(), out4_on, false);
-//                            }
-//                            else
-//                            {
-//                              Cron.create(cron_string.c_str(), out4_off, false);
-//                            }
-//                          }
-//                          else if (output == "out5" && status == true)
-//                          {
-//                            // if (repeat == true)
-//                            // {
-//                            //   if (state == true)
-//                            //   {
-//                            //     Cron.create(cron_string.c_str(), out4_on_once, true);
-//                            //   }
-//                            //   else
-//                            //   {
-//                            //     Cron.create(cron_string.c_str(), out4_off_once, true);
-//                            //   }
-//                            // }
-//                            // else
-//                            // {
-//                            if (state == true)
-//                            {
-//                              Cron.create(cron_string.c_str(), out5_on, false);
-//                            }
-//                            else
-//                            {
-//                              Cron.create(cron_string.c_str(), out5_off, false);
-//                            }
-//                            // }
-//                          }
-//                        }
-//                      }
-//                      else
-//                      {
-//                        Serial.println(fbdo.errorReason());
-//                      }
-
-//                      schedule.clear(); });
-// }
-
-// void rainSensor()
-// {
-//   if (!digitalRead(pinSensorHujan) && hujan)
-//   {
-//     client.publish(String("/" + MACADD + "/data/weather"), "true", false);
-//     hujan = false;
-//   }
-
-//   if (digitalRead(pinSensorHujan) && !hujan)
-//   {
-//     client.publish(String("/" + MACADD + "/data/weather"), "false", false);
-//     hujan = true;
-//   }
-// }
 
 void sensorDisplay()
 {
@@ -1134,11 +1170,39 @@ void sensorDisplay()
   }
 }
 
+void rainSensor()
+{
+  if (!digitalRead(pinSensorHujan) && hujan)
+  {
+    client.publish(rain_topic.c_str(), "true", false);
+    hujan = false;
+  }
+
+  if (digitalRead(pinSensorHujan) && !hujan)
+  {
+    client.publish(rain_topic.c_str(), "false", false);
+    hujan = true;
+  }
+}
+
+unsigned long getTime()
+{
+  time_t now;
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo))
+  {
+    // Serial.println("Failed to obtain time");
+    return (0);
+  }
+  time(&now);
+  return now;
+}
+
 void loop()
 {
   getLocalTime(&timeinfo);
 
-  client.loop();
+  epochTime = getTime();
 
   millisTime = millis();
 
@@ -1146,51 +1210,89 @@ void loop()
 
   btn.tick();
 
-  // if (!getLocalTime(&timeinfo))
-  // {
-  //   // Serial.println("Failed to obtain time");
-  //   // return;
-  // }
-  // Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
-  // Serial.println(asctime(&timeinfo));
-
-  // sendTime = String(String(timeClient.getHours()) + ":" + String(timeClient.getMinutes()));
-  // days = timeClient.getDay();
-
-  // Serial.println(sendTime);
-  // Serial.print("convert time = ");
-  // Serial.println(sendTime);
-
-  // delay(1000); // ================= remove
-
-  sensorRead();
-  // // rainSensor();
-  sensorDisplay();
-
-  // // scheduleAndAction();
-
-  if (timeinfo.tm_sec % 5 == 0 || timeinfo.tm_sec == 0)
+  if (!client.connected() || WiFi.status() != WL_CONNECTED)
   {
-    Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/temp", t);
-    Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/humi", h);
-    Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/soil", kelembabanTanah);
-    Firebase.RTDB.setInt(&fbdo, "/" + MACADD + "/data/ph", phTanahValue);
-
-    // rtdbTime = millisTime;
+    Serial.println("Reconnecting to WiFi...");
+    WiFi.disconnect();
+    WiFi.reconnect();
+    long now = millis();
+    if (now - lastReconnectAttempt > 5000)
+    {
+      reconnect_to_mqtt();
+      // Attempt to reconnect
+      lastReconnectAttempt = now;
+    }
+  }
+  else
+  {
+    client.loop();
   }
 
-  if (timeinfo.tm_min % 30 == 0 || timeinfo.tm_min == 0)
+  sensorRead();
+  // rainSensor();
+  sensorDisplay();
+
+  if (timeinfo.tm_sec % 20 == 0)
   {
 
-    json.set("/temp", t);
-    json.set("/hum", h);
-    json.set("/soil", kelembabanTanah);
-    json.set("/ph", phTanahValue);
-    json.set("/time", sendTime);
+    DynamicJsonDocument sensor_data_set(128);
+    String string_sensor_data_set;
 
-    Firebase.RTDB.pushJSON(&fbdo, "/" + MACADD + "/Sensor", &json);
+    sensor_data_set["humi"] = h;
+    sensor_data_set["temp"] = t;
+    sensor_data_set["soil"] = kelembabanTanah;
+    sensor_data_set["ph"] = phTanahValue;
 
-    // sensorTime = millisTime;
+    serializeJson(sensor_data_set, string_sensor_data_set);
+
+    api_endpoint = String("http://mikiko.herokuapp.com/sensor/set/" + MACADD);
+
+    http.begin(mikiko_client, api_endpoint.c_str());
+    http.addHeader("Content-Type", "application/json");
+
+    if (http.POST(string_sensor_data_set) > 0)
+    {
+      Serial.print("HTTP Response code: ");
+      Serial.println(http.getString());
+    }
+    else
+    {
+      Serial.print("Error code: ");
+    }
+
+    http.end();
+  }
+
+  if (timeinfo.tm_min % 30 == 0 && timeinfo.tm_sec == 0)
+  {
+
+    DynamicJsonDocument sensor_data(256);
+    String string_sensor_data;
+
+    sensor_data["humi"] = h;
+    sensor_data["temp"] = t;
+    sensor_data["soil"] = kelembabanTanah;
+    sensor_data["ph"] = phTanahValue;
+    sensor_data["time"] = epochTime;
+
+    serializeJson(sensor_data, string_sensor_data);
+
+    api_endpoint = String("http://mikiko.herokuapp.com/sensor/add/" + MACADD);
+
+    http.begin(mikiko_client, api_endpoint.c_str());
+    http.addHeader("Content-Type", "application/json");
+
+    if (http.POST(string_sensor_data) > 0)
+    {
+      Serial.print("HTTP Response code: ");
+      Serial.println(http.getString());
+    }
+    else
+    {
+      Serial.print("Error code: ");
+    }
+
+    http.end();
   }
 
   delayMicroseconds(5);
