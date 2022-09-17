@@ -753,11 +753,11 @@ void mqtt_process(char *topic, byte *payload)
 
     if (msg == "true")
     {
-      digitalWrite(out1, HIGH);
+      digitalWrite(out1, LOW);
     }
     else
     {
-      digitalWrite(out1, LOW);
+      digitalWrite(out1, HIGH);
     }
   }
   else if (strTopic == topic2)
